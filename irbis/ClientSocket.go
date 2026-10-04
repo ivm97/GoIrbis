@@ -35,22 +35,22 @@ func (client *Tcp4ClientSocket) TalkToServer(ctx context.Context, query *ClientQ
 
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
-		return nil, WrapError(ErrCodeNetwork, err)
+		return nil, WrapError(CodeNetwork, err)
 	}
 	defer func() { _ = conn.Close() }()
 
 	if err := applyIODeadline(ctx, conn, connection.ioTimeout()); err != nil {
-		return nil, WrapError(ErrCodeNetwork, err)
+		return nil, WrapError(CodeNetwork, err)
 	}
 
 	packet := query.EncodePacket()
 	if _, err := conn.Write(packet); err != nil {
-		return nil, WrapError(ErrCodeNetwork, err)
+		return nil, WrapError(CodeNetwork, err)
 	}
 
 	response, err := ReadServerResponse(conn)
 	if err != nil {
-		return nil, WrapError(ErrCodeNetwork, err)
+		return nil, WrapError(CodeNetwork, err)
 	}
 	return response, nil
 }

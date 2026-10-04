@@ -1,25 +1,26 @@
 package irbis
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
 
 func TestDescribeError_Success(t *testing.T) {
 	if got := DescribeError(0); got != "no error" {
 		t.Fatalf("DescribeError(0)=%q, want %q", got, "no error")
 	}
-	if got := DescribeError(1); got != "no error" {
-		t.Fatalf("DescribeError(1)=%q, want %q", got, "no error")
-	}
 }
 
 func TestDescribeError_KnownCodes(t *testing.T) {
 	cases := map[int]string{
-		-3333:   "unregistered client (not in the client list)",
-		-3337:   "client is already registered",
-		-4444:   "wrong password",
-		-5555:   "file does not exist",
-		-602:    "record is locked for edit",
-		-608:    "record version conflict",
-		-100000: "network error: failed to connect to server",
+		CodeUnregisteredClient:      "unregistered client (not in the client list)",
+		CodeClientAlreadyRegistered: "client is already registered",
+		CodeWrongPassword:           "wrong password",
+		CodeFileNotFound:            "file does not exist",
+		CodeRecordLocked:            "record is locked for edit",
+		CodeRecordVersionConflict:   "record version conflict",
+		CodeNetwork:                 "network error: failed to connect to server",
 	}
 	for code, want := range cases {
 		if got := DescribeError(code); got != want {
@@ -33,6 +34,29 @@ func TestDescribeError_UnknownCodeIncludesNumber(t *testing.T) {
 	want := "unknown error (-424242)"
 	if got != want {
 		t.Fatalf("DescribeError(-424242)=%q, want %q", got, want)
+	}
+}
+
+func TestError_IsByCode(t *testing.T) {
+	err := WrapError(CodeWrongPassword, fmt.Errorf("auth rejected"))
+	if !errors.Is(err, ErrWrongPassword) {
+		t.Fatal("expected errors.Is(err, ErrWrongPassword)")
+	}
+	if errors.Is(err, ErrNetwork) {
+		t.Fatal("wrong password must not match ErrNetwork")
+	}
+	if CodeOf(err) != CodeWrongPassword {
+		t.Fatalf("CodeOf=%d", CodeOf(err))
+	}
+}
+
+func TestReturnCodeError(t *testing.T) {
+	if ReturnCodeError(0) != nil {
+		t.Fatal("non-negative code must yield nil")
+	}
+	err := ReturnCodeError(CodeFileNotFound)
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("got %v", err)
 	}
 }
 

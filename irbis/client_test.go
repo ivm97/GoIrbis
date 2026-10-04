@@ -3,6 +3,7 @@ package irbis
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ type scriptSocket struct {
 func (s *scriptSocket) TalkToServer(ctx context.Context, _ *ClientQuery) (*ServerResponse, error) {
 	s.lastCtx = ctx
 	if err := ctx.Err(); err != nil {
-		return nil, WrapError(ErrCodeNetwork, err)
+		return nil, WrapError(CodeNetwork, err)
 	}
 	if s.calls >= len(s.responses) {
 		return nil, fmt.Errorf("unexpected query #%d", s.calls+1)
@@ -89,8 +90,8 @@ func TestConnectContext_Canceled(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if CodeOf(err) != ErrCodeNetwork {
-		t.Fatalf("CodeOf=%d, want %d (%v)", CodeOf(err), ErrCodeNetwork, err)
+	if !errors.Is(err, ErrNetwork) {
+		t.Fatalf("got %v, want ErrNetwork", err)
 	}
 }
 
@@ -168,15 +169,15 @@ func TestClient_Do_UsesContextDeadline(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected deadline error")
 	}
-	if CodeOf(err) != ErrCodeNetwork {
-		t.Fatalf("CodeOf=%d, want %d", CodeOf(err), ErrCodeNetwork)
+	if !errors.Is(err, ErrNetwork) {
+		t.Fatalf("got %v, want ErrNetwork", err)
 	}
 }
 
 func TestCodeOf(t *testing.T) {
-	err := NewError(-4444)
-	if CodeOf(err) != -4444 {
-		t.Fatalf("CodeOf=%d, want -4444", CodeOf(err))
+	err := NewError(CodeWrongPassword)
+	if CodeOf(err) != CodeWrongPassword {
+		t.Fatalf("CodeOf=%d, want %d", CodeOf(err), CodeWrongPassword)
 	}
 	if CodeOf(fmt.Errorf("plain")) != 0 {
 		t.Fatal("plain error should yield 0")

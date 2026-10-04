@@ -2,7 +2,6 @@ package irbis
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"strings"
 	"unicode"
@@ -266,103 +265,4 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
-}
-
-// DescribeError returns an English description for an IRBIS return code.
-// Non-negative codes mean success. Client-side network failure uses -100000.
-func DescribeError(code int) string {
-	if code >= 0 {
-		return "no error"
-	}
-
-	switch code {
-	case -100:
-		return "MFN is outside the database bounds"
-	case -101:
-		return "invalid shelf size"
-	case -102:
-		return "invalid shelf number"
-	case -140:
-		return "MFN is outside the database bounds"
-	case -141:
-		return "read error"
-	case -200:
-		return "requested field is missing"
-	case -201:
-		return "previous record version is missing"
-	case -202:
-		return "term not found"
-	case -203:
-		return "last term in the list"
-	case -204:
-		return "first term in the list"
-	case -300, -301:
-		return "database is exclusively locked"
-	case -400:
-		return "failed to open MST or XRF (master data file error)"
-	case -401:
-		return "failed to open IFP (index file error)"
-	case -402:
-		return "write error"
-	case -403:
-		return "actualization error"
-	case -600, -603:
-		return "record is logically deleted"
-	case -601, -605:
-		return "record is physically deleted"
-	case -602:
-		return "record is locked for edit"
-	case -607:
-		return "autoin.gbl error"
-	case -608:
-		return "record version conflict"
-	case -700:
-		return "backup creation failed"
-	case -701:
-		return "restore from backup failed"
-	case -702:
-		return "sort error"
-	case -703:
-		return "invalid term"
-	case -704:
-		return "dictionary creation failed"
-	case -705:
-		return "dictionary load failed"
-	case -800:
-		return "invalid global correction parameters"
-	case -801:
-		return "global correction: ERR_GBL_REP"
-	case -802:
-		return "global correction: ERR_GBL_MET"
-	case -1111:
-		return "server execution error"
-	case -2222:
-		return "protocol error"
-	case -3333:
-		return "unregistered client (not in the client list)"
-	case -3334:
-		return "client has not logged in"
-	case -3335:
-		return "invalid client identifier"
-	case -3336:
-		return "no access to workstation commands"
-	case -3337:
-		return "client is already registered"
-	case -3338:
-		return "client is not allowed"
-	case -4444:
-		return "wrong password"
-	case -5555:
-		return "file does not exist"
-	case -6666:
-		return "server overloaded (max processing threads reached)"
-	case -7777:
-		return "failed to start or stop administrator process"
-	case -8888:
-		return "general error"
-	case -100000:
-		return "network error: failed to connect to server"
-	}
-
-	return fmt.Sprintf("unknown error (%d)", code)
 }

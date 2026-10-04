@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Client is a stateless IRBIS configuration that implements Service.
+// Client is a stateless IRBIS configuration.
 // Each method opens a fresh logical session: login → work → logout.
 // Safe for concurrent use: every call uses its own Connection.
 type Client struct {
@@ -19,7 +19,7 @@ type Client struct {
 	IOTimeout   time.Duration
 }
 
-// NewClient builds a Service implementation from Config.
+// NewClient builds a client from Config.
 // Omit Config for package defaults (IOTimeout=0: wait until context cancels).
 func NewClient(cfg ...Config) *Client {
 	var c Config
@@ -106,7 +106,7 @@ func (c *Client) ReadRecord(ctx context.Context, mfn int) (*MarcRecord, error) {
 			if conn.LastError < 0 {
 				return conn.Err()
 			}
-			return NewError(ErrCodeNetwork)
+			return NewError(CodeNetwork)
 		}
 		return nil
 	})
@@ -146,7 +146,7 @@ func (c *Client) NoOp(ctx context.Context) error {
 			if conn.LastError < 0 {
 				return conn.Err()
 			}
-			return NewError(ErrCodeNetwork)
+			return NewError(CodeNetwork)
 		}
 		return nil
 	})

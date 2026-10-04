@@ -90,7 +90,7 @@ func (connection *Connection) setError(err error) {
 		return
 	}
 	if err != nil {
-		connection.LastError = ErrCodeNetwork
+		connection.LastError = CodeNetwork
 		return
 	}
 	connection.LastError = 0
@@ -160,7 +160,7 @@ func (connection *Connection) ConnectContext(ctx context.Context) error {
 
 	for attempt := 0; attempt < maxConnectAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			connection.setError(WrapError(ErrCodeNetwork, err))
+			connection.setError(WrapError(CodeNetwork, err))
 			return connection.lastErr
 		}
 
@@ -176,7 +176,7 @@ func (connection *Connection) ConnectContext(ctx context.Context) error {
 		}
 
 		code := response.GetReturnCode()
-		if code == -3337 {
+		if code == CodeClientAlreadyRegistered {
 			continue
 		}
 		if code < 0 {
@@ -193,7 +193,7 @@ func (connection *Connection) ConnectContext(ctx context.Context) error {
 		return nil
 	}
 
-	err := NewError(-3337)
+	err := NewError(CodeClientAlreadyRegistered)
 	connection.setError(err)
 	return err
 }
@@ -328,7 +328,7 @@ func (connection *Connection) ExecuteContext(ctx context.Context, query *ClientQ
 		return nil, connection.lastErr
 	}
 	if response == nil {
-		err = NewError(ErrCodeNetwork)
+		err = NewError(CodeNetwork)
 		connection.setError(err)
 		return nil, err
 	}

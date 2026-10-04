@@ -34,7 +34,7 @@ func TestConfig_CustomTimeoutsPreserved(t *testing.T) {
 }
 
 func TestNewClient_AppliesConfig(t *testing.T) {
-	var svc Service = NewClient(Config{
+	client := NewClient(Config{
 		Host:        "irbis.example",
 		Port:        5555,
 		Username:    "u",
@@ -43,7 +43,6 @@ func TestNewClient_AppliesConfig(t *testing.T) {
 		DialTimeout: 7 * time.Second,
 		IOTimeout:   90 * time.Second,
 	})
-	client := svc.(*Client)
 	if client.Host != "irbis.example" || client.Port != 5555 {
 		t.Fatalf("client address: %+v", client)
 	}
