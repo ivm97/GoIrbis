@@ -1,43 +1,46 @@
-# GoIrbis — возможности и примеры
+# GoIrbis — usage
 
-Клиентская библиотека для работы с сервером **ИРБИС64** на языке Go.
-Порт ManagedIrbis: чистый TCP-протокол, без `irbis64_client.dll` и без внешних зависимостей.
+Go client for the **IRBIS64** library server.
+Pure TCP protocol — no `irbis64_client.dll`, no CGO, no third-party deps in the library module.
 
-Пакет: `src/irbis` (`package irbis`).
-
-> Сейчас репозиторий в стиле GOPATH (без `go.mod`). Локально удобнее подключать пакет относительным импортом; после появления module path — через `go get`.
+Package import:
 
 ```go
-import "github.com/ivm97/GoIrbis/src/irbis" // после go.mod
-// или
-import "./src/irbis"                       // локально / GOPATH
+import "github.com/ivm97/GoIrbis/irbis"
 ```
 
-Требования: сервер ИРБИС64 (от ~2014), Go 1.12+ (проверено также на современных версиях).
+```bash
+go get github.com/ivm97/GoIrbis/irbis@latest
+```
+
+Requirements: Go 1.22+, IRBIS64 server (≈2014+).
 
 ---
 
-## Основные возможности
+## Capabilities
 
-| Область | Что умеет |
-|--------|-----------|
-| Подключение | TCP-клиент, строка подключения, INI с сервера, `NoOp` |
-| Записи | чтение / запись / удаление / восстановление, пакетные операции |
-| Поиск | простой, расширенный, с лимитом 32k+, count, search+read |
-| Форматы | `@brief`, произвольный PFT, Unicode в формате |
-| Словарь | термины, постинги, префиксы |
-| Файлы сервера | текст, меню, INI, OPT, PAR, TRE, список файлов |
-| Администрирование | БД, пользователи, процессы, статистика, GBL |
-| Локальный доступ | прямое чтение MST/XRF (`DirectAccess`) |
-| Утилиты | ISO2709, builder поисковых выражений, CP1251 |
+| Area | Features |
+|------|----------|
+| Connection | TCP client, connection string, server INI, `NoOp` |
+| Records | read / write / delete / undelete, batch ops |
+| Search | simple, extended, >32k via paging, count, search+read |
+| Format | `@brief`, custom PFT, Unicode in format |
+| Dictionary | terms, postings, prefixes |
+| Server files | text, menu, INI, OPT, PAR, TRE, file list |
+| Admin | databases, users, processes, stats, GBL |
+| Direct access | local MST/XRF (`DirectAccess`) |
+| Utilities | ISO2709, search expression builder, CP1251 |
 
-Клиент **однопоточный**: один `Connection` — один поток. Для параллелизма нужны несколько подключений (если позволяет лицензия сервера). Keep-alive сервер сам не шлёт — вызывайте `NoOp` по таймеру.
+One `Connection` is single-flight: do not call it from multiple goroutines.
+For parallel work, open a separate connection per goroutine / request (login each time), if the server license allows.
+
+Keep-alive is not automatic — call `NoOp` on a timer while a session stays open.
 
 ---
 
-## Подключение
+## Connect
 
-Значения по умолчанию: `127.0.0.1:6666`, база `IBIS`, АРМ `C` (каталогизатор).
+Defaults: `127.0.0.1:6666`, database `IBIS`, workstation `C` (cataloger).
 
 ```go
 package main
@@ -46,7 +49,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/ivm97/GoIrbis/src/irbis"
+	"github.com/ivm97/GoIrbis/irbis"
 )
 
 func main() {
@@ -59,22 +62,21 @@ func main() {
 	conn.Workstation = irbis.CATALOGER // "C"
 
 	if !conn.Connect() {
-		log.Fatal("не удалось подключиться:", irbis.DescribeError(conn.LastError))
+		log.Fatal(irbis.DescribeError(conn.LastError))
 	}
 	defer conn.Disconnect()
 
-	fmt.Println("версия сервера:", conn.ServerVersion)
-	fmt.Println("интервал (мин):", conn.Interval)
+	fmt.Println("server version:", conn.ServerVersion)
+	fmt.Println("interval (min):", conn.Interval)
 
-	// настройки клиента с сервера
 	fmtMenu := conn.Ini.GetValue("Main", "FmtMnu", "FMT31.MNU")
 	fmt.Println("FmtMnu:", fmtMenu)
 
-	conn.NoOp() // подтверждение сессии
+	conn.NoOp()
 }
 ```
 
-Строка подключения:
+Connection string:
 
 ```go
 conn := irbis.NewConnection()
@@ -85,32 +87,25 @@ if !conn.Connect() {
 	log.Fatal(irbis.DescribeError(conn.LastError))
 }
 defer conn.Disconnect()
-
-fmt.Println(conn.ToConnectionString())
 ```
 
-Ключи: `host|server|address`, `port`, `user|username|name|login`, `pwd|password`, `db|database|catalog`, `arm|workstation`.
+Keys: `host|server|address`, `port`, `user|username|name|login`, `pwd|password`, `db|database|catalog`, `arm|workstation`.
 
-Коды АРМ: `A` админ, `C` каталогизатор, `M` комплектатор, `R` читатель, `B` книговыдача, `K` книгообеспеченность.
+Workstation codes: `A` admin, `C` cataloger, `M` acquisitions, `R` reader, `B` circulation, `K` provision.
 
 ---
 
-## Поиск
-
-Поисковое выражение — синтаксис ИРБИС; кавычки обычно нужны:
+## Search
 
 ```go
 found := conn.Search(`"A=ПУШКИН$"`)
-fmt.Println("найдено (≤32k):", len(found))
+fmt.Println("found (≤32k):", len(found))
 
 count := conn.SearchCount(`"A=ПУШКИН$"`)
-fmt.Println("всего по запросу:", count)
-
-all := conn.SearchAll(`"A=ПУШКИН$"`) // несколько запросов к серверу
-fmt.Println("все MFN:", len(all))
+all := conn.SearchAll(`"A=ПУШКИН$"`) // multiple server round-trips
 ```
 
-Поиск с чтением записей:
+Search and load records:
 
 ```go
 records := conn.SearchRead(`"A=ПУШКИН$"`, 50)
@@ -120,11 +115,11 @@ for _, rec := range records {
 
 one := conn.SearchSingleRecord(`"I=65.304.13-772296"`)
 if one == nil {
-	fmt.Println("не найдено")
+	fmt.Println("not found")
 }
 ```
 
-Расширенный поиск (лимит, формат, диапазон MFN):
+Extended search:
 
 ```go
 params := irbis.NewSearchParameters()
@@ -138,37 +133,34 @@ for _, line := range conn.SearchEx(params) {
 }
 ```
 
-Builder выражений:
+Expression builder:
 
 ```go
 expr := irbis.Author("Пушкин$").And(irbis.Year("2020")).String()
-// примерно: ("A=Пушкин$" * "G=2020")
 found := conn.Search(expr)
 ```
 
-Хелперы: `Author`, `Title`, `Keyword`, `Year`, `Language`, `Publisher`, `Subject`, `Udc`, `Bbk`, `Number`, `Mhr`, …; операторы `And` / `Or` / `Not` / `SameField` / `SameRepeat`.
+Helpers: `Author`, `Title`, `Keyword`, `Year`, `Language`, `Publisher`, `Subject`, `Udc`, `Bbk`, `Number`, `Mhr`, …  
+Operators: `And` / `Or` / `Not` / `SameField` / `SameRepeat`.
 
-Частые префиксы: `A=` автор, `T=` заглавие, `K=` ключевые слова, `I=` шифр, `IN=` инвентарный номер, `G=` год, `J=` язык.
+Common prefixes: `A=` author, `T=` title, `K=` keywords, `I=` document index, `IN=` inventory, `G=` year, `J=` language.
 
 ---
 
-## Записи (MarcRecord)
-
-Чтение:
+## Records (MarcRecord)
 
 ```go
 rec := conn.ReadRecord(123)
 if rec == nil {
-	log.Fatal("запись не прочитана:", irbis.DescribeError(conn.LastError))
+	log.Fatal(irbis.DescribeError(conn.LastError))
 }
-fmt.Println("заглавие:", rec.FSM(200, 'a'))
-fmt.Println("автор:", rec.FSM(700, 'a'))
+fmt.Println(rec.FSM(200, 'a'))
 
 batch := conn.ReadRecords([]int{1, 2, 3})
 old := conn.ReadRecordVersion(123, 3)
 ```
 
-Создание и запись:
+Create and write:
 
 ```go
 conn.Database = "SANDBOX"
@@ -179,134 +171,96 @@ rec.Add(700, "").
 	Add('b', "А. В.").
 	Add('g', "Алексей Владимирович")
 rec.Add(200, "").
-	Add('a', "Работа с ИРБИС64").
-	Add('e', "руководство пользователя")
+	Add('a', "Working with IRBIS64").
+	Add('e', "user guide")
 rec.Add(210, "").
-	Add('a', "Иркутск").
-	Add('c', "ИРНИТУ").
+	Add('a', "Irkutsk").
+	Add('c', "IRNITU").
 	Add('d', "2019")
 rec.Add(920, "PAZK")
 
-maxMfn := conn.WriteRecord(rec) // после записи сервер может прогнать AUTOIN.GBL
+maxMfn := conn.WriteRecord(rec) // server may run AUTOIN.GBL
 fmt.Println("MFN:", rec.Mfn, "max MFN:", maxMfn)
 ```
 
-Пакетная запись, удаление, восстановление:
-
 ```go
 ok := conn.WriteRecords(records)
-
-conn.DeleteRecord(123)                 // логическое удаление
+conn.DeleteRecord(123)
 restored := conn.UndeleteRecord(123)
 ```
 
-Полезные методы записи:
+Useful methods: `FM` / `FSM` / `FMA` / `FSMA`, `GetField` / `GetFields`, `SetField` / `SetSubfield`, `RemoveField`, `IsDeleted`, `Clone`, `Encode` / `Decode`.
 
-- `FM(tag)` / `FSM(tag, code)` — первое поле / подполе  
-- `FMA` / `FSMA` — все значения  
-- `GetField` / `GetFields` / `HaveField`  
-- `SetField` / `SetSubfield` / `RemoveField`  
-- `IsDeleted`, `Clone`, `Encode` / `Decode`
-
-Статусы (битовые флаги): `LOGICALLY_DELETED`, `PHYSICALLY_DELETED`, `LOCKED_RECORD`, `NON_ACTUALIZED`, …
+Status flags: `LOGICALLY_DELETED`, `PHYSICALLY_DELETED`, `LOCKED_RECORD`, `NON_ACTUALIZED`, …
 
 ---
 
-## Форматирование
+## Formatting
 
 ```go
 text := conn.FormatMfn(irbis.BRIEF_FORMAT, 123)
-fmt.Println(text)
-
-// произвольный PFT (Unicode допустим)
-text = conn.FormatMfn("'Автор: ', v700^a", 123)
-
+text = conn.FormatMfn("'Author: ', v700^a", 123)
 lines := conn.FormatRecords(irbis.BRIEF_FORMAT, []int{1, 2, 3})
 
-// запись ещё не на сервере — с клиента
 draft := irbis.NewMarcRecord()
-draft.Add(200, "").Add('a', "Черновик")
+draft.Add(200, "").Add('a', "Draft")
 fmt.Println(conn.FormatRecord(irbis.BRIEF_FORMAT, draft))
 ```
 
-Константы форматов: `BRIEF_FORMAT` (`@brief`), `ALL_FORMAT`, `IBIS_FORMAT`, `INFO_FORMAT`, `OPTIMIZED_FORMAT`.
+Format constants: `BRIEF_FORMAT`, `ALL_FORMAT`, `IBIS_FORMAT`, `INFO_FORMAT`, `OPTIMIZED_FORMAT`.
 
 ---
 
-## Словарь: термины и постинги
+## Dictionary
 
 ```go
 terms := conn.ReadTerms("A=ПУШ", 20)
-for _, t := range terms {
-	fmt.Println(t.Text, t.Count)
-}
-
 langs := conn.ListTerms("J=")
-fmt.Println(langs)
 
 pp := irbis.NewPostingParameters()
 pp.Term = "J=CHI"
 pp.NumberOfPostings = 100
 fmt.Println(conn.ReadPostings(pp))
-
 fmt.Println(conn.GetRecordPostings(2, "A=$"))
 ```
 
 ---
 
-## Файлы на сервере
+## Server files
 
-Спецификация вида `путь.база.имя` (например `3.IBIS.WS31.OPT`).
+Specification form: `path.database.name` (e.g. `3.IBIS.WS31.OPT`).
 
 ```go
 content := conn.ReadTextFile("3.IBIS.WS.OPT")
-lines := conn.ReadTextLines("3.IBIS.brief.pft")
-
 menu := conn.ReadMenuFile("3.IBIS.FORMATW.MNU")
-ini := conn.ReadIniFile("...")
 opt := conn.ReadOptFile("3.IBIS.WS31.OPT")
 par := conn.ReadParFile("1..IBIS.PAR")
 tree := conn.ReadTreeFile("3.IBIS.II.TRE")
-
 files := conn.ListFiles("3.IBIS.brief.*", "3.IBIS.a*.pft")
 
-conn.WriteTextFile("3.IBIS.my.txt", "строка1\nстрока2\n")
+conn.WriteTextFile("3.IBIS.my.txt", "line1\nline2\n")
 conn.DeleteFile("3.IBIS.my.txt")
 ```
 
 ---
 
-## Сведения о сервере и администрирование
+## Server info and admin
 
 ```go
 ver := conn.GetServerVersion()
-fmt.Println(ver.Organization, ver.Version)
-
 stat := conn.GetServerStat()
-fmt.Println(stat)
-
 fmt.Println(conn.ListProcesses())
-fmt.Println(conn.ListDatabases("")) // или спецификация dbnam*.mnu
+fmt.Println(conn.ListDatabases(""))
 fmt.Println(conn.GetDatabaseInfo("IBIS"))
 fmt.Println(conn.GetMaxMfn("IBIS"))
 fmt.Println(conn.GetUserList())
-
-// осторожно: меняет состояние сервера
-conn.CreateDatabase("TEST", "Тестовая", true)
-conn.CreateDictionary("TEST")
-conn.ActualizeDatabase("TEST")
-conn.TruncateDatabase("TEST")
-conn.DeleteDatabase("TEST")
-conn.UnlockDatabase("IBIS")
 ```
 
-Глобальная корректировка — через `GlobalCorrection(*GblSettings)`.
+Destructive / privileged ops: `CreateDatabase`, `DeleteDatabase`, `TruncateDatabase`, `Actualize*`, `UnlockDatabase`, `GlobalCorrection`.
 
 ---
 
-## Прямой доступ к файлам БД (без сервера)
-
-Если есть файлы MST/XRF на диске:
+## Direct DB access (no server)
 
 ```go
 access, err := irbis.OpenDatabase("/path/to/ibis.mst")
@@ -315,7 +269,6 @@ if err != nil {
 }
 defer access.Close()
 
-fmt.Println("max MFN:", access.GetMaxMfn())
 rec, err := access.ReadRecord(1)
 if err != nil {
 	log.Fatal(err)
@@ -323,57 +276,41 @@ if err != nil {
 fmt.Println(rec.FSM(200, 'a'))
 ```
 
-Также есть разбор ISO2709 (`ReadIsoRecord`), экспорт в plain text (`ToPlainText` / `ExportPlainText`).
+Also: `ReadIsoRecord`, `ToPlainText` / `ExportPlainText`.
 
 ---
 
-## Обработка ошибок
+## Errors
 
-Большинство методов возвращают `bool`, `nil` или пустой результат; код — в `conn.LastError`.
+Most methods return `bool`, `nil`, or an empty value; the numeric code is in `conn.LastError`.
+Human-readable text (English): `irbis.DescribeError(code)`.
 
 ```go
 if !conn.Connect() {
 	fmt.Println(irbis.DescribeError(conn.LastError))
 	return
 }
-
-rec := conn.ReadRecord(999999)
-if rec == nil {
-	fmt.Println(irbis.DescribeError(conn.LastError))
-}
-
-// аварийный выход (log.Fatal) — только для простых скриптов
-conn.FailOnError()
 ```
 
-Типичные коды: `-3333` клиент не в списке, `-4444` неверный пароль, `-5555` файл не найден, `-602` запись заблокирована, `-608` конфликт версии.
+Typical codes: `-3333` unregistered client, `-4444` bad password, `-5555` file not found, `-602` record locked, `-608` version conflict, `-100000` client dial/network failure.
+
+`FailOnError()` calls `log.Fatal` — only for tiny scripts.
 
 ---
 
-## Примеры в репозитории
+## Examples in this repo
 
-| Файл | Назначение |
-|------|------------|
-| `examples/Example1.go` | подключение, поиск, чтение, `@brief` |
-| `examples/Example2.go` | создание и запись 10 записей |
-| `examples/icqbot.go` | бот-пример поверх библиотеки |
-| `src/SafeExperiments.go` | «дымовой» обход многих API-методов |
-
-Запуск примера (GOPATH-режим, из корня репозитория):
+See [examples/README.md](examples/README.md).
 
 ```bash
-GO111MODULE=off GOPATH="$PWD" go run examples/Example1.go
-```
-
-Тесты пакета:
-
-```bash
-GO111MODULE=off GOPATH="$PWD" go test -v ./src/irbis
+go test ./irbis/...
+go run ./examples/search_and_read
+go run ./examples/direct_access
 ```
 
 ---
 
-## Краткая шпаргалка API `Connection`
+## Connection API cheat sheet
 
 ```
 Connect / Disconnect / NoOp / ParseConnectionString / ToConnectionString

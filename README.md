@@ -1,63 +1,80 @@
 # GoIrbis
 
-ManagedIrbis ported to Go language
+Клиентская библиотека на Go для работы с сервером **ИРБИС64**.
 
-Currently supported Go 1.12 on 64-bit Windows and Linux
+Изначально это порт ManagedIrbis, который написал **Алексей Миронов** ([amironov73](https://github.com/amironov73)). Оригинальный репозиторий он удалил; здесь живёт форк с доработками под современный Go. Авторство исходного кода — за ним (см. также `LICENSE`, Copyright 2019 Alexey Mironov).
 
-### Build status
+Библиотека говорит с сервером по его родному TCP-протоколу. Не нужна `irbis64_client.dll`, нет CGO и нет внешних зависимостей у пакета `irbis`. На Windows и Linux ведёт себя одинаково. По объёму сейчас около 5.5k строк в самом пакете — поиск, чтение и запись MARC-записей, словарь, файлы на сервере, админские операции и прямое чтение MST/XRF с диска.
 
-[![Build status](https://img.shields.io/appveyor/ci/AlexeyMironov/goirbis.svg)](https://ci.appveyor.com/project/AlexeyMironov/goirbis/)
-[![Build status](https://api.travis-ci.org/amironov73/GoIrbis.svg)](https://travis-ci.org/amironov73/GoIrbis/)
+Ожидается Go 1.22+ и сервер ИРБИС64 примерно от 2014 года.
 
-### Sample program
+## Установка
+
+```bash
+go get github.com/ivm97/GoIrbis/irbis@latest
+```
+
+```go
+import "github.com/ivm97/GoIrbis/irbis"
+```
+
+## Быстрый старт
 
 ```go
 package main
 
-import "./src/irbis"
+import (
+	"fmt"
+	"log"
 
-func main ()  {
-	// Connect to the server
-	connection := irbis.NewConnection()
-	connection.Host = "localhost"
-	connection.Username = "librarian"
-	connection.Password = "secret"
-	if !connection.Connect() {
-		println("Can't connect")
-		connection.FailOnError()
+	"github.com/ivm97/GoIrbis/irbis"
+)
+
+func main() {
+	conn := irbis.NewConnection()
+	conn.Host = "localhost"
+	conn.Username = "librarian"
+	conn.Password = "secret"
+
+	if !conn.Connect() {
+		log.Fatal(irbis.DescribeError(conn.LastError))
 	}
+	defer conn.Disconnect()
 
-	// Will be disconnected at exit
-	defer connection.Disconnect()
-
-	// General server information
-	println("Server version:", connection.ServerVersion)
-	println("Interval:", connection.Interval)
-
-	// Proposed client settings from INI-file
-	ini := connection.Ini
-	dbnnamecat := ini.GetValue("Main", "DBNNAMECAT", "???")
-	println("DBNNAMECAT:", dbnnamecat)
-
-	// Search for books written by Byron
-	found := connection.Search("\"A=Byron, George$\"")
-	println("Records found:", len(found))
-
+	found := conn.Search(`"A=Byron, George$"`)
 	for _, mfn := range found {
-		// Read the record
-		record := connection.ReadRecord(mfn)
-
-		// Get field/subfield value
-		title := record.FSM(200, 'a')
-		println("Title:", title)
-
-		// Formatting (at the server)
-		description := connection.FormatMfn("@brief", mfn)
-		println("Description:", description)
+		rec := conn.ReadRecord(mfn)
+		if rec == nil {
+			continue
+		}
+		fmt.Println(rec.FSM(200, 'a'))
+		fmt.Println(conn.FormatMfn(irbis.BRIEF_FORMAT, mfn))
 	}
 }
+
 ```
 
-#### Documentation (in russian)
+По умолчанию клиент стучится на `127.0.0.1:6666`, база `IBIS`, АРМ каталогизатора (`C`). Строку подключения можно разобрать через `ParseConnectionString`.
 
-[![Badge](https://readthedocs.org/projects/goirbis/badge/)](https://goirbis.readthedocs.io/)
+Один экземпляр `Connection` рассчитан на последовательную работу. Если нужны параллельные запросы — открывайте отдельное подключение на каждый поток или HTTP-запрос (с логином заново), насколько позволяет лицензия сервера. Пока сессия жива, периодически вызывайте `NoOp`, иначе сервер может её сбросить.
+
+## Что умеет
+
+Поиск по выражениям ИРБИС (в том числе больше 32 тысяч записей через `SearchAll`), чтение и сохранение записей, расформатирование на сервере (`@brief` и произвольный PFT), работа со словарём и постингами, чтение меню/INI/OPT/PAR/TRE, создание и удаление баз, список пользователей и процессов. Если сервер недоступен, а файлы базы есть на диске — `DirectAccess` читает MST/XRF напрямую.
+
+Подробности и рецепты — в [USAGE.md](USAGE.md). Живые примеры лежат в `examples/`: поиск и чтение, запись в `SANDBOX`, офлайн-разбор ISO и MST, плюс старый icq-бот как иллюстрация встраивания.
+
+```bash
+go test ./irbis/...
+go run ./examples/search_and_read
+```
+
+## Структура репозитория
+
+`irbis/` — сам модуль, его и подключают в проекты.  
+`examples/` — демо, не часть публичного API.  
+`data/` — небольшие фикстуры для офлайн-примеров.
+
+## Лицензия
+
+MIT. Исходный copyright — Alexey Mironov, 2019.
