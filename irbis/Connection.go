@@ -1,74 +1,118 @@
 package irbis
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"log"
-	"math/rand"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// Connection Подключение к серверу ИРБИС64.
+const (
+	maxConnectAttempts = 10
+	clientIDMin        = 100000
+	clientIDRange      = 900000
+)
+
+// Connection is a logical IRBIS64 client session.
+// Each command still opens its own TCP connection.
 type Connection struct {
-	// Host Адрес сервера (можно задавать как my.domain.com,
-	// так и 192.168.1.1).
-	Host string
-
-	// Port Порт сервера
-	Port int
-
-	// Username Логин пользователя. Регистр символов не учитывается.
-	Username string
-
-	// Password Пароль пользователя. Регистр символов учитывается.
-	Password string
-
-	// Database Имя текущей базы данных.
-	Database string
-
-	// Workstation Код АРМа.
+	Host        string
+	Port        int
+	Username    string
+	Password    string
+	Database    string
 	Workstation string
 
-	// ClientId Идентификатор клиента. Задаётся автоматически
-	// при подключении к серверу.
+	// ClientId is assigned on Connect.
 	ClientId int
 
-	// QueryId Последовательный номер запроса к серверу.
-	// Ведется автоматически
+	// QueryId is the sequential command number for the session.
 	QueryId int
 
-	// ServerVersion Версия сервера
-	// (становится доступна после подключения к нему).
 	ServerVersion string
+	Interval      int
+	Connected     bool
+	Ini           *IniFile
 
-	// Interval Рекомендуемый интервал подключения, минуты.
-	// Становится доступен после подключения к серверу.
-	Interval int
+	// DialTimeout limits TCP dial; zero means DefaultDialTimeout.
+	DialTimeout time.Duration
+	// IOTimeout limits one command write+read when context has no deadline.
+	// Zero means no transport IO deadline (context-only cancellation).
+	IOTimeout time.Duration
 
-	// Connected Признак подключения.
-	Connected bool
-
-	// Ini Серверный INI-файл (становится доступен после подключения).
-	Ini *IniFile
-
-	// socket Сокет.
-	socket ClientSocket
-
-	// Last error code
+	socket    ClientSocket
 	LastError int
+	lastErr   error
 }
 
-//===================================================================
-
-// NewConnection Конструктор, создает подключение с настройками по умолчанию.
-func NewConnection() *Connection {
-	result := new(Connection)
-	result.Host = "127.0.0.1"
-	result.Port = 6666
-	result.Database = "IBIS"
-	result.Workstation = "C"
+// NewConnection creates a connection.
+// Pass Config to set host/credentials/timeouts; omit for package defaults.
+func NewConnection(cfg ...Config) *Connection {
+	var c Config
+	if len(cfg) > 0 {
+		c = cfg[0]
+	}
+	c = c.withDefaults()
+	result := &Connection{
+		Host:        c.Host,
+		Port:        c.Port,
+		Username:    c.Username,
+		Password:    c.Password,
+		Database:    c.Database,
+		Workstation: c.Workstation,
+		DialTimeout: c.DialTimeout,
+		IOTimeout:   c.IOTimeout,
+	}
 	result.socket = NewTcp4ClientSocket(result)
-
 	return result
+}
+
+func (connection *Connection) dialTimeout() time.Duration {
+	if connection.DialTimeout > 0 {
+		return connection.DialTimeout
+	}
+	return DefaultDialTimeout
+}
+
+// ioTimeout returns the per-command transport deadline duration.
+// Zero means "no SetDeadline from IOTimeout".
+func (connection *Connection) ioTimeout() time.Duration {
+	return connection.IOTimeout
+}
+
+func (connection *Connection) setError(err error) {
+	connection.lastErr = err
+	if e, ok := AsError(err); ok {
+		connection.LastError = e.Code
+		return
+	}
+	if err != nil {
+		connection.LastError = ErrCodeNetwork
+		return
+	}
+	connection.LastError = 0
+}
+
+func (connection *Connection) clearError() {
+	connection.lastErr = nil
+	connection.LastError = 0
+}
+
+// Err returns the last operation error, if any.
+func (connection *Connection) Err() error {
+	return connection.lastErr
+}
+
+func randomClientID() int {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return clientIDMin + int(time.Now().UnixNano()%int64(clientIDRange))
+	}
+	n := binary.BigEndian.Uint32(buf[:]) % uint32(clientIDRange)
+	return clientIDMin + int(n)
 }
 
 //===================================================================
@@ -101,43 +145,57 @@ func (connection *Connection) ActualizeRecord(database string, mfn int) bool {
 
 //===================================================================
 
-// TODO возвращать ошибку
-
-// Connect Подключение к серверу ИРБИС64.
-// Если подключение уже установлено, ничего не меняется.
+// Connect logs in to the IRBIS64 server.
+// Prefer ConnectContext when cancellation or deadlines matter.
 func (connection *Connection) Connect() bool {
+	return connection.ConnectContext(context.Background()) == nil
+}
+
+// ConnectContext logs in using ctx for dial/IO cancellation.
+func (connection *Connection) ConnectContext(ctx context.Context) error {
 	if connection.Connected {
-		return true
+		connection.clearError()
+		return nil
 	}
 
-AGAIN:
-	connection.ClientId = 100000 + rand.Intn(900000)
-	connection.QueryId = 1
-	query := NewClientQuery(connection, "A")
-	query.AddAnsi(connection.Username).NewLine()
-	query.AddAnsi(connection.Password)
-	response := connection.Execute(query)
-	if response == nil {
-		return false
+	for attempt := 0; attempt < maxConnectAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			connection.setError(WrapError(ErrCodeNetwork, err))
+			return connection.lastErr
+		}
+
+		connection.ClientId = randomClientID()
+		connection.QueryId = 1
+		query := NewClientQuery(connection, "A")
+		query.AddAnsi(connection.Username).NewLine()
+		query.AddAnsi(connection.Password)
+
+		response, err := connection.ExecuteContext(ctx, query)
+		if err != nil {
+			return err
+		}
+
+		code := response.GetReturnCode()
+		if code == -3337 {
+			continue
+		}
+		if code < 0 {
+			return connection.lastErr
+		}
+
+		connection.Connected = true
+		connection.ServerVersion = response.ServerVersion
+		connection.Interval = response.ReadInteger()
+		ini := NewIniFile()
+		ini.Parse(response.ReadRemainingAnsiLines())
+		connection.Ini = ini
+		connection.clearError()
+		return nil
 	}
 
-	if response.GetReturnCode() == -3337 {
-		goto AGAIN
-	}
-
-	if response.ReturnCode < 0 {
-		return false
-	}
-
-	connection.Connected = true
-	connection.ServerVersion = response.ServerVersion
-	connection.Interval = response.ReadInteger()
-	lines := response.ReadRemainingAnsiLines()
-	ini := NewIniFile()
-	ini.Parse(lines)
-	connection.Ini = ini
-
-	return true
+	err := NewError(-3337)
+	connection.setError(err)
+	return err
 }
 
 //===================================================================
@@ -221,31 +279,61 @@ func (connection *Connection) DeleteRecord(mfn int) {
 
 //===================================================================
 
-// Disconnect Отключение от сервера.
-// Если подключение не установлено, ничего не меняется.
+// Disconnect logs out from the server.
+// Prefer DisconnectContext when cancellation or deadlines matter.
 func (connection *Connection) Disconnect() bool {
+	return connection.DisconnectContext(context.Background()) == nil
+}
+
+// DisconnectContext sends logout using ctx for dial/IO cancellation.
+func (connection *Connection) DisconnectContext(ctx context.Context) error {
 	if !connection.Connected {
-		return true
+		connection.clearError()
+		return nil
 	}
 
 	query := NewClientQuery(connection, "B")
 	query.AddAnsi(connection.Username)
-	connection.Execute(query)
+	_, err := connection.ExecuteContext(ctx, query)
 	connection.Connected = false
-	return true
+	if err != nil {
+		return err
+	}
+	connection.clearError()
+	return nil
 }
 
 //===================================================================
 
-// Execute Отправка клиентского запроса на сервер
-// и получение ответа от него.
+// Execute sends a client query and returns the server response.
+// Prefer ExecuteContext when cancellation or deadlines matter.
 func (connection *Connection) Execute(query *ClientQuery) *ServerResponse {
-	connection.LastError = 0
-	result := connection.socket.TalkToServer(query)
-	if result != nil {
-		result.connection = connection
+	response, err := connection.ExecuteContext(context.Background(), query)
+	if err != nil {
+		return nil
 	}
-	return result
+	return response
+}
+
+// ExecuteContext sends a query using ctx for dial/IO cancellation.
+func (connection *Connection) ExecuteContext(ctx context.Context, query *ClientQuery) (*ServerResponse, error) {
+	connection.clearError()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	response, err := connection.socket.TalkToServer(ctx, query)
+	if err != nil {
+		connection.setError(err)
+		return nil, connection.lastErr
+	}
+	if response == nil {
+		err = NewError(ErrCodeNetwork)
+		connection.setError(err)
+		return nil, err
+	}
+	response.connection = connection
+	return response, nil
 }
 
 //===================================================================

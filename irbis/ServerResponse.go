@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// ServerResponse is a parsed IRBIS server reply.
 type ServerResponse struct {
 	Command       string
 	ClientId      int
@@ -19,10 +20,20 @@ type ServerResponse struct {
 	connection    *Connection
 }
 
-func NewServerResponse(conn net.Conn) *ServerResponse {
-	result := &ServerResponse{}
-	buffer, _ := io.ReadAll(conn)
-	result.reader = bytes.NewReader(buffer)
+// ReadServerResponse reads and parses a full response from conn.
+func ReadServerResponse(conn net.Conn) (*ServerResponse, error) {
+	buffer, err := io.ReadAll(conn)
+	if err != nil {
+		return nil, err
+	}
+	return ParseServerResponse(buffer), nil
+}
+
+// ParseServerResponse parses an already buffered server reply.
+func ParseServerResponse(buffer []byte) *ServerResponse {
+	result := &ServerResponse{
+		reader: bytes.NewReader(buffer),
+	}
 	result.Command = result.ReadAnsi()
 	result.ClientId = result.ReadInteger()
 	result.QueryId = result.ReadInteger()
@@ -34,6 +45,16 @@ func NewServerResponse(conn net.Conn) *ServerResponse {
 	result.ReadAnsi()
 	result.ReadAnsi()
 	return result
+}
+
+// NewServerResponse reads a response from conn.
+// Deprecated: prefer ReadServerResponse.
+func NewServerResponse(conn net.Conn) *ServerResponse {
+	response, err := ReadServerResponse(conn)
+	if err != nil {
+		return nil
+	}
+	return response
 }
 
 func (response *ServerResponse) CheckReturnCode(allowed ...int) bool {
@@ -48,10 +69,6 @@ func (response *ServerResponse) CheckReturnCode(allowed ...int) bool {
 }
 
 func (response *ServerResponse) GetLine() []byte {
-	//if response.EOT {
-	//	return []byte{}
-	//}
-
 	result := bytes.Buffer{}
 	for response.reader.Len() != 0 {
 		one, err := response.reader.ReadByte()
@@ -77,7 +94,14 @@ func (response *ServerResponse) GetLine() []byte {
 
 func (response *ServerResponse) GetReturnCode() int {
 	response.ReturnCode = response.ReadInteger()
-	response.connection.LastError = response.ReturnCode
+	if response.connection != nil {
+		response.connection.LastError = response.ReturnCode
+		if response.ReturnCode < 0 {
+			response.connection.setError(NewError(response.ReturnCode))
+		} else {
+			response.connection.clearError()
+		}
+	}
 	return response.ReturnCode
 }
 

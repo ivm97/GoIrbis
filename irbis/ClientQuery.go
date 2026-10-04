@@ -9,7 +9,7 @@ type ClientQuery struct {
 	chunks [][]byte
 }
 
-// NewClientQuery формирует заголовок клиентского запроса.
+// NewClientQuery builds a request header and advances QueryId for the session.
 func NewClientQuery(connection *Connection, command string) *ClientQuery {
 	result := ClientQuery{}
 	result.AddAnsi(command).NewLine()
@@ -22,6 +22,7 @@ func NewClientQuery(connection *Connection, command string) *ClientQuery {
 	result.NewLine()
 	result.NewLine()
 	result.NewLine()
+	connection.QueryId++
 	return &result
 }
 
@@ -65,17 +66,27 @@ func (query *ClientQuery) AddUtf(text string) *ClientQuery {
 	return query
 }
 
-// Encode выдает сетевой пакет, который нужно отправить серверу.
+// Encode выдает сетевой пакет чанками (для совместимости и тестов).
 func (query *ClientQuery) Encode() [][]byte {
+	packet := query.EncodePacket()
+	return [][]byte{packet}
+}
+
+// EncodePacket builds a single TCP payload: length prefix + body.
+func (query *ClientQuery) EncodePacket() []byte {
 	length := 0
 	for i := range query.chunks {
 		length += len(query.chunks[i])
 	}
 	prefix := strconv.Itoa(length) + "\n"
-	result := [][]byte{toUtf8(prefix)}
-	result = append(result, query.chunks...)
+	prefixBytes := toUtf8(prefix)
 
-	return result
+	packet := make([]byte, 0, len(prefixBytes)+length)
+	packet = append(packet, prefixBytes...)
+	for i := range query.chunks {
+		packet = append(packet, query.chunks[i]...)
+	}
+	return packet
 }
 
 // NewLine добавляет в запрос перевод строки (\n).

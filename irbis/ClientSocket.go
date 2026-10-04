@@ -1,44 +1,73 @@
 package irbis
 
 import (
+	"context"
 	"net"
 	"strconv"
+	"time"
 )
 
+// ClientSocket sends one client query and reads one server response.
+// IRBIS uses a fresh TCP connection per command.
 type ClientSocket interface {
-	TalkToServer(query *ClientQuery) *ServerResponse
+	TalkToServer(ctx context.Context, query *ClientQuery) (*ServerResponse, error)
 }
 
+// Tcp4ClientSocket is the default TCP transport.
 type Tcp4ClientSocket struct {
 	connection *Connection
 }
 
+// NewTcp4ClientSocket binds a socket implementation to a connection.
 func NewTcp4ClientSocket(connection *Connection) *Tcp4ClientSocket {
-	result := new(Tcp4ClientSocket)
-	result.connection = connection
-	return result
+	return &Tcp4ClientSocket{connection: connection}
 }
 
-func (client *Tcp4ClientSocket) TalkToServer(query *ClientQuery) *ServerResponse {
+func (client *Tcp4ClientSocket) TalkToServer(ctx context.Context, query *ClientQuery) (*ServerResponse, error) {
 	connection := client.connection
-	address := connection.Host + ":" + strconv.Itoa(connection.Port)
-	socket, err := net.Dial("tcp", address)
-	if err != nil {
-		connection.LastError = -100000
-		return nil
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
-	defer func() { _ = socket.Close() }()
+	// Aborting here only closes the client TCP wait. IRBIS may still finish the command.
+	address := net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port))
+	dialer := net.Dialer{Timeout: connection.dialTimeout()}
 
-	chunks := query.Encode()
-	for i := range chunks {
-		_, err = socket.Write(chunks[i])
-		if err != nil {
-			return nil
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, WrapError(ErrCodeNetwork, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := applyIODeadline(ctx, conn, connection.ioTimeout()); err != nil {
+		return nil, WrapError(ErrCodeNetwork, err)
+	}
+
+	packet := query.EncodePacket()
+	if _, err := conn.Write(packet); err != nil {
+		return nil, WrapError(ErrCodeNetwork, err)
+	}
+
+	response, err := ReadServerResponse(conn)
+	if err != nil {
+		return nil, WrapError(ErrCodeNetwork, err)
+	}
+	return response, nil
+}
+
+// applyIODeadline sets a socket deadline from context and/or IOTimeout.
+// IOTimeout <= 0 means no transport limit beyond context.
+func applyIODeadline(ctx context.Context, conn net.Conn, ioTimeout time.Duration) error {
+	deadline, hasCtxDeadline := ctx.Deadline()
+	if ioTimeout > 0 {
+		alt := time.Now().Add(ioTimeout)
+		if !hasCtxDeadline || alt.Before(deadline) {
+			deadline = alt
+			hasCtxDeadline = true
 		}
 	}
-
-	result := NewServerResponse(socket)
-
-	return result
+	if !hasCtxDeadline {
+		return nil
+	}
+	return conn.SetDeadline(deadline)
 }
