@@ -19,9 +19,34 @@ func NewRawRecord() *RawRecord {
 	return new(RawRecord)
 }
 
-// Decode декодирует запись из протокольного представления.
+// Decode decodes a record from the IRBIS protocol line form.
+// Field bodies stay as raw strings (not split into subfields).
 func (record *RawRecord) Decode(lines []string) {
-	// TODO implement
+	if len(lines) < 2 {
+		return
+	}
+
+	first := strings.Split(lines[0], "#")
+	record.Mfn, _ = strconv.Atoi(first[0])
+	if len(first) > 1 {
+		record.Status, _ = strconv.Atoi(first[1])
+	}
+
+	second := strings.Split(lines[1], "#")
+	if len(second) > 1 {
+		record.Version, _ = strconv.Atoi(second[1])
+	}
+
+	if cap(record.Fields) > 0 {
+		record.Fields = record.Fields[:0]
+	} else {
+		record.Fields = make([]string, 0, len(lines)-2)
+	}
+	for i := 2; i < len(lines); i++ {
+		if lines[i] != "" {
+			record.Fields = append(record.Fields, lines[i])
+		}
+	}
 }
 
 // Encode кодирует запись в протокольное представление.

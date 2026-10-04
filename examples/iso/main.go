@@ -1,20 +1,29 @@
 package main
 
 import (
-	"github.com/ivm97/GoIrbis/irbis"
 	"fmt"
+	"io"
+	"log"
 	"os"
+
+	"github.com/ivm97/GoIrbis/irbis"
 )
 
 func main() {
 	file, err := os.Open("data/test1.iso")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer func() { _ = file.Close() }()
 
-	for mfn := 1; mfn <= 81; mfn++ {
-		record := irbis.ReadIsoRecord(file, irbis.FromAnsi)
+	for mfn := 1; ; mfn++ {
+		record, err := irbis.ReadIsoRecord(file, irbis.FromAnsi)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
 		record.Mfn = mfn
 		fmt.Println(record)
 	}

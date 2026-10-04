@@ -1,14 +1,22 @@
 package irbis
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 )
 
 const IsoMarkerLength = 24
-const IsoRecordDelimiter = byte(0x1D)
-const IsoFieldDelimiter = byte(0x1E)
-const IsoSubfieldDelimiter = byte(0x1F)
+
+const (
+	IsoRecordDelimiter   = byte(0x1D)
+	IsoFieldDelimiter    = byte(0x1E)
+	IsoSubfieldDelimiter = byte(0x1F)
+)
+
+// ErrInvalidISO means the stream is not a well-formed ISO2709 record.
+var ErrInvalidISO = errors.New("not an ISO2709 record")
 
 func encodeInt32(buffer []byte, position, length, value int) {
 	length--
@@ -31,7 +39,7 @@ func encodeText(buffer []byte, position int, text string) int {
 	return position
 }
 
-// DecodeBody декодирует только текст поля.
+// DecodeBody decodes only the field body text.
 func (field *RecordField) decodeBody(body string) {
 	delimiter := IsoSubfieldDelimiter
 	all := strings.Split(body, string(delimiter))
@@ -48,25 +56,28 @@ func (field *RecordField) decodeBody(body string) {
 	}
 }
 
-func ReadIsoRecord(reader io.Reader, decoder func([]byte) string) *MarcRecord {
+// ReadIsoRecord reads one ISO2709 record from reader.
+func ReadIsoRecord(reader io.Reader, decoder func([]byte) string) (*MarcRecord, error) {
 	result := NewMarcRecord()
 
-	// считываем длину записи
 	marker := make([]byte, 5)
-	if _, err := reader.Read(marker); err != nil {
-		panic(err)
+	if _, err := io.ReadFull(reader, marker); err != nil {
+		return nil, err
 	}
 
-	// а затем и ее остаток
 	recordLength := ParseInt32(marker)
-	record := make([]byte, recordLength)
-	if _, err := reader.Read(record[len(marker):]); err != nil {
-		panic(err)
+	if recordLength < IsoMarkerLength {
+		return nil, fmt.Errorf("%w: invalid length %d", ErrInvalidISO, recordLength)
 	}
 
-	// Простая проверка, что мы имеем дело с нормальной ISO-записью
+	record := make([]byte, recordLength)
+	copy(record, marker)
+	if _, err := io.ReadFull(reader, record[len(marker):]); err != nil {
+		return nil, err
+	}
+
 	if record[recordLength-1] != IsoRecordDelimiter {
-		panic("Not ISO record")
+		return nil, ErrInvalidISO
 	}
 
 	lengthOfLength := ParseInt32(record[20:21])
@@ -76,8 +87,6 @@ func ReadIsoRecord(reader io.Reader, decoder func([]byte) string) *MarcRecord {
 	indicatorLength := ParseInt32(record[10:11])
 	baseAddress := ParseInt32(record[12:17])
 
-	// Подсчитываем количество полей в записи,
-	// чтобы уменьшить трафик памяти в result.Fields
 	fieldCount := 0
 	for ofs := IsoMarkerLength; ; ofs += directoryLength {
 		if record[ofs] == IsoFieldDelimiter {
@@ -87,10 +96,7 @@ func ReadIsoRecord(reader io.Reader, decoder func([]byte) string) *MarcRecord {
 	}
 	result.Fields = make([]*RecordField, 0, fieldCount)
 
-	// Пошли по полям при помощи справочника
 	for directory := IsoMarkerLength; ; directory += directoryLength {
-		// Переходим к следующему полю.
-		// Если нарвались на разделитель, значит, справочник закончился
 		if record[directory] == IsoFieldDelimiter {
 			break
 		}
@@ -103,15 +109,9 @@ func ReadIsoRecord(reader io.Reader, decoder func([]byte) string) *MarcRecord {
 		field := NewRecordField(tag, "")
 		result.Fields = append(result.Fields, field)
 		if tag < 10 {
-			// Фиксированное поле
-			// не может содержать подполей и индикаторов
 			temp := record[fieldOffset : fieldOffset+fieldLength-1]
 			field.Value = decoder(temp)
 		} else {
-			// Поле переменной длины
-			// Содержит два однобайтных индикатора
-			// Может содержать подполя
-
 			start := fieldOffset + indicatorLength
 			stop := fieldOffset + fieldLength - indicatorLength + 1
 			temp := record[start:stop]
@@ -120,5 +120,5 @@ func ReadIsoRecord(reader io.Reader, decoder func([]byte) string) *MarcRecord {
 		}
 	}
 
-	return result
+	return result, nil
 }

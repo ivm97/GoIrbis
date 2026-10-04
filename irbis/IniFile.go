@@ -36,7 +36,12 @@ func (section *IniSection) GetValue(key, defaultValue string) string {
 }
 
 func (section *IniSection) Remove(key string) {
-	// TODO implement
+	for i := range section.Lines {
+		if SameString(section.Lines[i].Key, key) {
+			section.Lines = append(section.Lines[:i], section.Lines[i+1:]...)
+			return
+		}
+	}
 }
 
 func (section *IniSection) SetValue(key, value string) {

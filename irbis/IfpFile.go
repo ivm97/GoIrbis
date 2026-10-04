@@ -111,18 +111,16 @@ func (ifp *IfpFile) Close() {
 	_ = ifp.n01File.Close()
 }
 
-func (ifp *IfpFile) readNode(leaf bool, file *os.File, offset int64) (result *NodeRecord) {
-	_, err := file.Seek(offset, io.SeekStart)
-	if err != nil {
-		panic(err)
+func (ifp *IfpFile) readNode(leaf bool, file *os.File, offset int64) (*NodeRecord, error) {
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
 	}
 
 	leader := new(NodeLeader)
-	err = binary.Read(file, binary.BigEndian, &leader)
-	if err != nil {
-		panic(err)
+	if err := binary.Read(file, binary.BigEndian, leader); err != nil {
+		return nil, err
 	}
 
-	result = new(NodeRecord)
-	return
+	_ = leaf
+	return &NodeRecord{}, nil
 }

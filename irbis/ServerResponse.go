@@ -154,6 +154,12 @@ func (response *ServerResponse) ReadRemainingUtfText() string {
 	return result
 }
 
+// ReadRemainingBytes returns the unread response tail as raw bytes.
+func (response *ServerResponse) ReadRemainingBytes() []byte {
+	data, _ := io.ReadAll(response.reader)
+	return data
+}
+
 func (response *ServerResponse) ReadUtf() string {
 	line := response.GetLine()
 	result := fromUtf8(line)

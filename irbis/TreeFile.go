@@ -1,114 +1,95 @@
 package irbis
 
+import "fmt"
+
+// TreeNode is one node in a TRE hierarchy.
 type TreeNode struct {
 	Value    string
 	Children []TreeNode
 	level    int
 }
 
+// Add appends a child node.
 func (node *TreeNode) Add(value string) *TreeNode {
 	child := TreeNode{Value: value}
 	node.Children = append(node.Children, child)
-	return node
+	return &node.Children[len(node.Children)-1]
 }
 
 func (node *TreeNode) String() string {
 	return node.Value
 }
 
+// TreeFile is an IRBIS TRE menu/tree.
 type TreeFile struct {
 	Roots []TreeNode
 }
 
-func arrange1(list []TreeNode, level int) {
-	count := len(list)
-	index := 0
-	for index < count {
-		next := arrange2(list, level, index, count)
-		index = next
-	}
-}
-
-func arrange2(list []TreeNode, level, index, count int) int {
-	next := index + 1
-	level2 := level + 1
-	parent := list[index]
-	for next < count {
-		child := list[next]
-		if child.level < level {
-			break
-		}
-		if child.level == level2 {
-			parent.Children = append(parent.Children, child)
-		}
-		next++
-	}
-	return next
-}
-
 func countIndent(text string) (result int) {
-	length := len(text)
-	for i := 0; i < length; i++ {
+	for i := 0; i < len(text); i++ {
 		if text[i] == '\t' {
 			result++
-		} else {
-			break
+			continue
 		}
+		break
 	}
 	return
 }
 
+// AddRoot appends a top-level node.
 func (tree *TreeFile) AddRoot(value string) *TreeNode {
-	result := new(TreeNode)
-	result.Value = value
-	tree.Roots = append(tree.Roots, *result)
-	result = &tree.Roots[len(tree.Roots)-1]
-	return result
+	tree.Roots = append(tree.Roots, TreeNode{Value: value})
+	return &tree.Roots[len(tree.Roots)-1]
 }
 
-func (tree *TreeFile) Parse(lines []string) {
-	// TODO implement properly
-
-	if len(lines) == 0 {
-		return
+// Parse builds the tree from tab-indented TRE lines.
+// Returns an error for empty roots with non-zero indent or skipped levels.
+func (tree *TreeFile) Parse(lines []string) error {
+	type item struct {
+		level int
+		value string
 	}
 
-	currentLevel := 0
-	line := lines[0]
-	if countIndent(line) != 0 {
-		panic("Wrong indent")
-	}
-	list := []TreeNode{{Value: line}}
-
-	maxLevel := 0
-	for _, item := range list {
-		if item.level > maxLevel {
-			maxLevel = item.level
-		}
-	}
-
-	for _, line := range lines[1:] {
+	flat := make([]item, 0, len(lines))
+	for _, line := range lines {
 		if len(line) == 0 {
 			continue
 		}
 		level := countIndent(line)
-		if level > (currentLevel + 1) {
-			panic("Wrong level")
-		}
-		currentLevel = level
-		line = line[currentLevel:]
-		node := TreeNode{Value: line, level: currentLevel}
-		list = append(list, node)
+		flat = append(flat, item{level: level, value: line[level:]})
+	}
+	if len(flat) == 0 {
+		return nil
+	}
+	if flat[0].level != 0 {
+		return fmt.Errorf("tree: first line must have zero indent")
 	}
 
-	for level := 0; level < maxLevel; level++ {
-		arrange1(list, level)
+	nodes := make([]*TreeNode, len(flat))
+	for i, it := range flat {
+		nodes[i] = &TreeNode{Value: it.value, level: it.level}
 	}
 
-	for i := range list {
-		item := list[i]
-		if item.level == 0 {
-			tree.Roots = append(tree.Roots, item)
+	stack := make([]*TreeNode, 0, 8)
+	for _, n := range nodes {
+		if n.level == 0 {
+			stack = stack[:0]
+			stack = append(stack, n)
+			continue
+		}
+		if n.level > len(stack) {
+			return fmt.Errorf("tree: invalid indent level %d", n.level)
+		}
+		stack = stack[:n.level]
+		parent := stack[len(stack)-1]
+		parent.Children = append(parent.Children, TreeNode{Value: n.Value, level: n.level})
+		stack = append(stack, &parent.Children[len(parent.Children)-1])
+	}
+
+	for _, n := range nodes {
+		if n.level == 0 {
+			tree.Roots = append(tree.Roots, *n)
 		}
 	}
+	return nil
 }

@@ -833,15 +833,36 @@ func (connection *Connection) PrintTable(definition *TableDefinition) (result st
 
 //===================================================================
 
-// ReadBinaryFile Чтение двоичного файла с сервера.
+// ReadBinaryFile reads a server-side file as raw bytes (command L).
+// Unlike ReadTextFile, the payload is not treated as ANSI text lines.
 func (connection *Connection) ReadBinaryFile(specification string) []byte {
 	if !connection.Connected {
 		return nil
 	}
 
-	// TODO implement
+	query := NewClientQuery(connection, "L")
+	query.AddAnsi(specification).NewLine()
+	response := connection.Execute(query)
+	if response == nil {
+		return nil
+	}
 
-	return nil
+	data := response.ReadRemainingBytes()
+	// Text framing around the payload uses CR/LF; trim only the envelope.
+	for len(data) > 0 && (data[0] == '\n' || data[0] == '\r') {
+		data = data[1:]
+	}
+	for len(data) > 0 {
+		last := data[len(data)-1]
+		if last != '\n' && last != '\r' {
+			break
+		}
+		data = data[:len(data)-1]
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	return data
 }
 
 //===================================================================
@@ -957,7 +978,7 @@ func (connection *Connection) ReadRawRecord(mfn int) *RawRecord {
 	query.AddAnsi(connection.Database).NewLine()
 	query.Add(mfn).NewLine()
 	response := connection.Execute(query)
-	if !response.CheckReturnCode(-201, -600, -601, -602) {
+	if response == nil || !response.CheckReturnCode(-201, -600, -601, -602) {
 		return nil
 	}
 
@@ -1165,7 +1186,10 @@ func (connection *Connection) ReadTreeFile(specification string) (result *TreeFi
 	}
 
 	result = new(TreeFile)
-	result.Parse(lines)
+	if err := result.Parse(lines); err != nil {
+		connection.setError(WrapError(CodeGeneralError, err))
+		return nil
+	}
 	return
 }
 

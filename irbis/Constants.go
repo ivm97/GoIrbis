@@ -74,4 +74,18 @@ const (
 	IRBIS_DELIMITER = "\x1F\x1E" // Разделитель строк в ИРБИС
 	SHORT_DELIMITER = "\x1E"     // Короткая версия разделителя строк
 
+	// Go-style aliases (same values; prefer these in new code).
+
+	StatusLogicallyDeleted      = LOGICALLY_DELETED
+	StatusPhysicallyDeleted     = PHYSICALLY_DELETED
+	StatusAbsent                = ABSENT
+	StatusNonActualized         = NON_ACTUALIZED
+	StatusLocked                = LOCKED_RECORD
+	FormatBrief                 = BRIEF_FORMAT
+	FormatAll                   = ALL_FORMAT
+	PrefixAuthor                = AUTHOR_PREFIX
+	PrefixTitle                 = TITLE_PREFIX
+	PrefixKeyword               = KEYWORD_PREFIX
+	WorkstationCataloger        = CATALOGER
+	WorkstationAdministrator    = ADMINISTRATOR
 )

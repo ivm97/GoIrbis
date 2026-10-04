@@ -192,33 +192,34 @@ func ParseInt32(buffer []byte) (result int) {
 	return
 }
 
-// ReadInt16 считывает из потока короткое целое в сетевом формате ИРБИС64.
-func ReadInt16(reader io.Reader) (result int16) {
+// ReadInt16 reads an int16 in IRBIS64 network byte order.
+func ReadInt16(reader io.Reader) (int16, error) {
+	var result int16
 	if err := binary.Read(reader, binary.BigEndian, &result); err != nil {
-		panic(err)
+		return 0, err
 	}
-	return
+	return result, nil
 }
 
-// ReadInt32 считывает из потока целое число в сетевом формате ИРБИС64.
-func ReadInt32(reader io.Reader) (result int32) {
+// ReadInt32 reads an int32 in IRBIS64 network byte order.
+func ReadInt32(reader io.Reader) (int32, error) {
+	var result int32
 	if err := binary.Read(reader, binary.BigEndian, &result); err != nil {
-		panic(err)
+		return 0, err
 	}
-	return
+	return result, nil
 }
 
-// ReadInt64 считывает из потока длинное целое в сетевом формате ИРБИС64.
-func ReadInt64(reader io.Reader) (result int64) {
+// ReadInt64 reads an int64 split as two IRBIS32 halves (low, high).
+func ReadInt64(reader io.Reader) (int64, error) {
 	var low, high int32
 	if err := binary.Read(reader, binary.BigEndian, &low); err != nil {
-		panic(err)
+		return 0, err
 	}
 	if err := binary.Read(reader, binary.BigEndian, &high); err != nil {
-		panic(err)
+		return 0, err
 	}
-	result = (int64(high) << 32) + int64(low)
-	return
+	return (int64(high) << 32) + int64(low), nil
 }
 
 func SameRune(left, right rune) bool {
@@ -229,8 +230,13 @@ func SameString(left, right string) bool {
 	return strings.EqualFold(left, right)
 }
 
+// SplitLines splits text on CR, LF, or CRLF.
 func SplitLines(text string) []string {
-	// TODO implement properly
+	if text == "" {
+		return nil
+	}
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
 	return strings.Split(text, "\n")
 }
 
