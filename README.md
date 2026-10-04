@@ -24,39 +24,55 @@ import "github.com/ivm97/GoIrbis/irbis"
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/ivm97/GoIrbis/irbis"
 )
 
 func main() {
-	conn := irbis.NewConnection()
-	conn.Host = "localhost"
-	conn.Username = "librarian"
-	conn.Password = "secret"
+	client := irbis.NewClient(irbis.Config{
+		Host:     "localhost",
+		Username: "librarian",
+		Password: "secret",
+	})
 
-	if !conn.Connect() {
-		log.Fatal(irbis.DescribeError(conn.LastError))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	found, err := client.Search(ctx, `"A=Byron, George$"`)
+	if err != nil {
+		log.Fatal(err)
 	}
-	defer conn.Disconnect()
-
-	found := conn.Search(`"A=Byron, George$"`)
 	for _, mfn := range found {
-		rec := conn.ReadRecord(mfn)
-		if rec == nil {
-			continue
+		rec, err := client.ReadRecord(ctx, mfn)
+		if err != nil {
+			log.Fatal(err)
 		}
 		fmt.Println(rec.FSM(200, 'a'))
-		fmt.Println(conn.FormatMfn(irbis.BRIEF_FORMAT, mfn))
 	}
 }
-
 ```
 
-По умолчанию клиент стучится на `127.0.0.1:6666`, база `IBIS`, АРМ каталогизатора (`C`). Строку подключения можно разобрать через `ParseConnectionString`.
+По умолчанию: `127.0.0.1:6666`, база `IBIS`, АРМ каталогизатора (`C`).  
+`*Client` на каждый вызов делает login → команда → logout; параллельные запросы безопасны (отдельные сессии, без мьютексов). Для длинной сессии есть `Connection`.
 
-Один экземпляр `Connection` рассчитан на последовательную работу. Если нужны параллельные запросы — открывайте отдельное подключение на каждый поток или HTTP-запрос (с логином заново), насколько позволяет лицензия сервера. Пока сессия жива, периодически вызывайте `NoOp`, иначе сервер может её сбросить.
+Таймауты задаются в `irbis.Config`. По умолчанию на команду нет жёсткого IO-лимита (ИРБИС часто отвечает долго): ограничивайте запрос через `context`. Срыв дедлайна обрывает только ожидание на клиенте, сервер команду сам не отменяет.
+
+Ошибки — тип `irbis.Error` с кодами (`CodeWrongPassword`, `CodeNetwork`, …) и текстами из протокола ИРБИС; удобно проверять через `errors.Is(err, irbis.ErrWrongPassword)`.
+
+Длинную сессию по-прежнему даёт `Connection`. Пока она жива, периодически вызывайте `NoOp`, иначе сервер может её сбросить.
+
+```go
+client := irbis.NewClient(irbis.Config{
+	Host:     "localhost",
+	Username: "librarian",
+	Password: "secret",
+	// IOTimeout: 3 * time.Minute, // если нужен жёсткий потолок на одну TCP-команду
+})
+```
 
 ## Что умеет
 

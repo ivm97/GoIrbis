@@ -31,23 +31,97 @@ Requirements: Go 1.22+, IRBIS64 server (≈2014+).
 | Direct access | local MST/XRF (`DirectAccess`) |
 | Utilities | ISO2709, search expression builder, CP1251 |
 
-One `Connection` is single-flight: do not call it from multiple goroutines.
-For parallel work, open a separate connection per goroutine / request (login each time), if the server license allows.
+Prefer `*Client` for HTTP/API handlers: one logical session per call, `context` for cancellation.
+Use `Connection` when you need a long-lived session and many commands without re-login.
+Keep-alive is not automatic — call `NoOp` on a timer while a long session stays open.
 
-Keep-alive is not automatic — call `NoOp` on a timer while a session stays open.
+### Timeouts
+
+Client-side only. If a deadline fires, Go closes the local TCP wait; IRBIS is **not** told to abort and may still finish the command on the server.
+
+- `DialTimeout` — TCP connect. Default `10s` when left zero in `Config`.
+- `IOTimeout` — one command write+read when context has no deadline. Default `0` = wait without transport limit (recommended for slow IRBIS). Set explicitly for hard caps.
+- `context` deadline/cancel — always honored and is the usual way to bound a request in services.
+
+```go
+client := irbis.NewClient(irbis.Config{
+	Host:        "localhost",
+	Username:    "librarian",
+	Password:    "secret",
+	Database:    "IBIS",
+	DialTimeout: 10 * time.Second,
+	IOTimeout:   3 * time.Minute, // optional hard cap per TCP command
+})
+```
 
 ---
 
-## Connect
-
-Defaults: `127.0.0.1:6666`, database `IBIS`, workstation `C` (cataloger).
+## Client (recommended for services)
 
 ```go
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
+	"time"
+
+	"github.com/ivm97/GoIrbis/irbis"
+)
+
+func main() {
+	client := irbis.NewClient(irbis.Config{
+		Host:     "localhost",
+		Username: "librarian",
+		Password: "secret",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	found, err := client.Search(ctx, `"A=ПУШКИН$"`)
+	if err != nil {
+		if errors.Is(err, irbis.ErrWrongPassword) {
+			log.Fatal("bad credentials")
+		}
+		log.Fatal(err) // also: irbis.CodeOf(err), irbis.DescribeError(...)
+	}
+
+	for _, mfn := range found {
+		rec, err := client.ReadRecord(ctx, mfn)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(rec.FSM(200, 'a'))
+	}
+}
+```
+
+`Do` runs arbitrary work inside one short session:
+
+```go
+err := client.Do(ctx, func(conn *irbis.Connection) error {
+	_ = conn.NoOp()
+	return nil
+})
+```
+
+Methods: `Do`, `Search`, `SearchCount`, `SearchAll`, `SearchRead`, `ReadRecord`, `ReadRecords`, `WriteRecord`, `FormatMfn`, `GetMaxMfn`, `ReadTerms`, `ReadTextFile`, `NoOp`.
+
+---
+
+## Connection (long session)
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
 
 	"github.com/ivm97/GoIrbis/irbis"
 )
@@ -55,16 +129,16 @@ import (
 func main() {
 	conn := irbis.NewConnection()
 	conn.Host = "localhost"
-	conn.Port = 6666
 	conn.Username = "librarian"
 	conn.Password = "secret"
-	conn.Database = "IBIS"
-	conn.Workstation = irbis.CATALOGER // "C"
 
-	if !conn.Connect() {
-		log.Fatal(irbis.DescribeError(conn.LastError))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := conn.ConnectContext(ctx); err != nil {
+		log.Fatal(err)
 	}
-	defer conn.Disconnect()
+	defer conn.DisconnectContext(context.Background())
 
 	fmt.Println("server version:", conn.ServerVersion)
 	fmt.Println("interval (min):", conn.Interval)
@@ -75,6 +149,8 @@ func main() {
 	conn.NoOp()
 }
 ```
+
+Legacy `Connect()` / `Disconnect()` / `Execute()` still work; they use `context.Background()`.
 
 Connection string:
 
@@ -282,17 +358,22 @@ Also: `ReadIsoRecord`, `ToPlainText` / `ExportPlainText`.
 
 ## Errors
 
-Most methods return `bool`, `nil`, or an empty value; the numeric code is in `conn.LastError`.
-Human-readable text (English): `irbis.DescribeError(code)`.
+Context-aware APIs (`Client`, `ConnectContext`, …) return `error` as `*irbis.Error`:
+numeric IRBIS code + English description.
 
 ```go
-if !conn.Connect() {
-	fmt.Println(irbis.DescribeError(conn.LastError))
-	return
-}
+err := client.Search(ctx, expr)
+if errors.Is(err, irbis.ErrUnregisteredClient) { /* ... */ }
+if errors.Is(err, irbis.ErrNetwork) { /* dial/timeout/cancel */ }
+
+code := irbis.CodeOf(err)                 // e.g. irbis.CodeWrongPassword
+text := irbis.DescribeError(code)         // same text as err.Error() without cause
 ```
 
-Typical codes: `-3333` unregistered client, `-4444` bad password, `-5555` file not found, `-602` record locked, `-608` version conflict, `-100000` client dial/network failure.
+Constants: `CodeWrongPassword`, `CodeUnregisteredClient`, `CodeRecordLocked`, `CodeNetwork`, …
+Sentinels for `errors.Is`: `ErrWrongPassword`, `ErrNetwork`, …
+
+Legacy `Connection` methods still use `bool`/`nil` + `conn.LastError`; prefer `conn.Err()` after a failed call.
 
 `FailOnError()` calls `log.Fatal` — only for tiny scripts.
 

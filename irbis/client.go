@@ -91,6 +91,26 @@ func (c *Client) SearchCount(ctx context.Context, expression string) (int, error
 	return count, err
 }
 
+// SearchAll returns all matching MFNs, paging past the 32k server limit.
+func (c *Client) SearchAll(ctx context.Context, expression string) ([]int, error) {
+	var found []int
+	err := c.Do(ctx, func(conn *Connection) error {
+		found = conn.SearchAll(expression)
+		return conn.Err()
+	})
+	return found, err
+}
+
+// SearchRead searches and loads records in one session.
+func (c *Client) SearchRead(ctx context.Context, expression string, limit int) ([]MarcRecord, error) {
+	var records []MarcRecord
+	err := c.Do(ctx, func(conn *Connection) error {
+		records = conn.SearchRead(expression, limit)
+		return conn.Err()
+	})
+	return records, err
+}
+
 // ReadRecord loads one record by MFN.
 func (c *Client) ReadRecord(ctx context.Context, mfn int) (*MarcRecord, error) {
 	var record *MarcRecord
@@ -105,6 +125,16 @@ func (c *Client) ReadRecord(ctx context.Context, mfn int) (*MarcRecord, error) {
 		return nil
 	})
 	return record, err
+}
+
+// ReadRecords loads several records in one session.
+func (c *Client) ReadRecords(ctx context.Context, mfns []int) ([]MarcRecord, error) {
+	var records []MarcRecord
+	err := c.Do(ctx, func(conn *Connection) error {
+		records = conn.ReadRecords(mfns)
+		return conn.Err()
+	})
+	return records, err
 }
 
 // WriteRecord saves a record and returns the server max MFN.
@@ -122,6 +152,36 @@ func (c *Client) FormatMfn(ctx context.Context, format string, mfn int) (string,
 	var text string
 	err := c.Do(ctx, func(conn *Connection) error {
 		text = conn.FormatMfn(format, mfn)
+		return conn.Err()
+	})
+	return text, err
+}
+
+// GetMaxMfn returns the database max MFN.
+func (c *Client) GetMaxMfn(ctx context.Context, database string) (int, error) {
+	var maxMfn int
+	err := c.Do(ctx, func(conn *Connection) error {
+		maxMfn = conn.GetMaxMfn(database)
+		return conn.Err()
+	})
+	return maxMfn, err
+}
+
+// ReadTerms reads dictionary terms starting from startTerm.
+func (c *Client) ReadTerms(ctx context.Context, startTerm string, number int) ([]TermInfo, error) {
+	var terms []TermInfo
+	err := c.Do(ctx, func(conn *Connection) error {
+		terms = conn.ReadTerms(startTerm, number)
+		return conn.Err()
+	})
+	return terms, err
+}
+
+// ReadTextFile reads a server-side text file.
+func (c *Client) ReadTextFile(ctx context.Context, specification string) (string, error) {
+	var text string
+	err := c.Do(ctx, func(conn *Connection) error {
+		text = conn.ReadTextFile(specification)
 		return conn.Err()
 	})
 	return text, err
