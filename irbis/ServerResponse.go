@@ -58,18 +58,26 @@ func NewServerResponse(conn net.Conn) *ServerResponse {
 }
 
 func (response *ServerResponse) CheckReturnCode(allowed ...int) bool {
-	if response.GetReturnCode() < 0 {
-		if contains(allowed, response.ReturnCode) {
-			return true
-		}
-		return false
+	code := response.GetReturnCode()
+	if code >= 0 {
+		return true
 	}
-
-	return true
+	if contains(allowed, code) {
+		// Allowed negative codes are successful outcomes (e.g. term not found).
+		if response.connection != nil {
+			response.connection.clearError()
+		}
+		return true
+	}
+	return false
 }
 
 func (response *ServerResponse) GetLine() []byte {
-	result := bytes.Buffer{}
+	n := response.reader.Len()
+	if n == 0 {
+		return nil
+	}
+	result := make([]byte, 0, min(n, 256))
 	for response.reader.Len() != 0 {
 		one, err := response.reader.ReadByte()
 		if err != nil {
@@ -85,11 +93,9 @@ func (response *ServerResponse) GetLine() []byte {
 			}
 			break
 		}
-
-		result.WriteByte(one)
+		result = append(result, one)
 	}
-
-	return result.Bytes()
+	return result
 }
 
 func (response *ServerResponse) GetReturnCode() int {

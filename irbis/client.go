@@ -76,10 +76,7 @@ func (c *Client) Search(ctx context.Context, expression string) ([]int, error) {
 	var found []int
 	err := c.Do(ctx, func(conn *Connection) error {
 		found = conn.Search(expression)
-		if conn.LastError < 0 {
-			return conn.Err()
-		}
-		return nil
+		return conn.Err()
 	})
 	return found, err
 }
@@ -89,10 +86,7 @@ func (c *Client) SearchCount(ctx context.Context, expression string) (int, error
 	var count int
 	err := c.Do(ctx, func(conn *Connection) error {
 		count = conn.SearchCount(expression)
-		if conn.LastError < 0 {
-			return conn.Err()
-		}
-		return nil
+		return conn.Err()
 	})
 	return count, err
 }
@@ -103,8 +97,8 @@ func (c *Client) ReadRecord(ctx context.Context, mfn int) (*MarcRecord, error) {
 	err := c.Do(ctx, func(conn *Connection) error {
 		record = conn.ReadRecord(mfn)
 		if record == nil {
-			if conn.LastError < 0 {
-				return conn.Err()
+			if err := conn.Err(); err != nil {
+				return err
 			}
 			return NewError(CodeNetwork)
 		}
@@ -118,10 +112,7 @@ func (c *Client) WriteRecord(ctx context.Context, record *MarcRecord) (int, erro
 	var maxMfn int
 	err := c.Do(ctx, func(conn *Connection) error {
 		maxMfn = conn.WriteRecord(record)
-		if conn.LastError < 0 {
-			return conn.Err()
-		}
-		return nil
+		return conn.Err()
 	})
 	return maxMfn, err
 }
@@ -131,10 +122,7 @@ func (c *Client) FormatMfn(ctx context.Context, format string, mfn int) (string,
 	var text string
 	err := c.Do(ctx, func(conn *Connection) error {
 		text = conn.FormatMfn(format, mfn)
-		if conn.LastError < 0 {
-			return conn.Err()
-		}
-		return nil
+		return conn.Err()
 	})
 	return text, err
 }
@@ -143,8 +131,8 @@ func (c *Client) FormatMfn(ctx context.Context, format string, mfn int) (string,
 func (c *Client) NoOp(ctx context.Context) error {
 	return c.Do(ctx, func(conn *Connection) error {
 		if !conn.NoOp() {
-			if conn.LastError < 0 {
-				return conn.Err()
+			if err := conn.Err(); err != nil {
+				return err
 			}
 			return NewError(CodeNetwork)
 		}

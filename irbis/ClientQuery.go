@@ -4,42 +4,43 @@ import (
 	"strconv"
 )
 
-// ClientQuery формирует клиентский запрос из запрашиваемых элементов (строк и их фрагментов).
+const defaultQueryCap = 256
+
+// ClientQuery builds one IRBIS client request body.
 type ClientQuery struct {
-	chunks [][]byte
+	buf []byte
 }
 
 // NewClientQuery builds a request header and advances QueryId for the session.
 func NewClientQuery(connection *Connection, command string) *ClientQuery {
-	result := ClientQuery{}
-	result.AddAnsi(command).NewLine()
-	result.AddAnsi(connection.Workstation).NewLine()
-	result.AddAnsi(command).NewLine()
-	result.Add(connection.ClientId).NewLine()
-	result.Add(connection.QueryId).NewLine()
-	result.AddAnsi(connection.Password).NewLine()
-	result.AddAnsi(connection.Username).NewLine()
-	result.NewLine()
-	result.NewLine()
-	result.NewLine()
+	query := &ClientQuery{buf: make([]byte, 0, defaultQueryCap)}
+	query.AddAnsi(command).NewLine()
+	query.AddAnsi(connection.Workstation).NewLine()
+	query.AddAnsi(command).NewLine()
+	query.Add(connection.ClientId).NewLine()
+	query.Add(connection.QueryId).NewLine()
+	query.AddAnsi(connection.Password).NewLine()
+	query.AddAnsi(connection.Username).NewLine()
+	query.NewLine()
+	query.NewLine()
+	query.NewLine()
 	connection.QueryId++
-	return &result
-}
-
-// Add добавляет в запрос целое число.
-func (query *ClientQuery) Add(value int) *ClientQuery {
-	return query.AddAnsi(strconv.Itoa(value))
-}
-
-// AddAnsi добавляет в запрос строку в кодировке ANSI.
-func (query *ClientQuery) AddAnsi(text string) *ClientQuery {
-	buf := ToAnsi(text)
-	query.chunks = append(query.chunks, buf)
 	return query
 }
 
-// AddFormat добавляет строку формата, предварительно подготовив её.
-// Также добавляется перевод строки.
+// Add appends an integer in ANSI/UTF-safe decimal form.
+func (query *ClientQuery) Add(value int) *ClientQuery {
+	query.buf = strconv.AppendInt(query.buf, int64(value), 10)
+	return query
+}
+
+// AddAnsi appends text encoded as Windows-1251.
+func (query *ClientQuery) AddAnsi(text string) *ClientQuery {
+	query.buf = appendCP1251(query.buf, text)
+	return query
+}
+
+// AddFormat appends a prepared format line and a newline.
 func (query *ClientQuery) AddFormat(format string) bool {
 	if len(format) == 0 {
 		query.NewLine()
@@ -53,44 +54,38 @@ func (query *ClientQuery) AddFormat(format string) bool {
 	} else if format[0] == '!' {
 		query.AddUtf(prepared)
 	} else {
-		query.AddUtf("!" + prepared)
+		query.AddUtf("!")
+		query.AddUtf(prepared)
 	}
 	query.NewLine()
 	return true
 }
 
-// AddUtf добавляет в запрос строку в кодировке UTF-8.
+// AddUtf appends text as UTF-8 bytes.
 func (query *ClientQuery) AddUtf(text string) *ClientQuery {
-	buf := toUtf8(text)
-	query.chunks = append(query.chunks, buf)
+	query.buf = append(query.buf, text...)
 	return query
 }
 
-// Encode выдает сетевой пакет чанками (для совместимости и тестов).
+// Encode returns the packet as a single chunk (compatibility helper).
 func (query *ClientQuery) Encode() [][]byte {
-	packet := query.EncodePacket()
-	return [][]byte{packet}
+	return [][]byte{query.EncodePacket()}
 }
 
-// EncodePacket builds a single TCP payload: length prefix + body.
+// EncodePacket builds length-prefix + body for one TCP write.
 func (query *ClientQuery) EncodePacket() []byte {
-	length := 0
-	for i := range query.chunks {
-		length += len(query.chunks[i])
-	}
-	prefix := strconv.Itoa(length) + "\n"
-	prefixBytes := toUtf8(prefix)
+	bodyLen := len(query.buf)
+	prefix := strconv.AppendInt(make([]byte, 0, 16), int64(bodyLen), 10)
+	prefix = append(prefix, '\n')
 
-	packet := make([]byte, 0, len(prefixBytes)+length)
-	packet = append(packet, prefixBytes...)
-	for i := range query.chunks {
-		packet = append(packet, query.chunks[i]...)
-	}
+	packet := make([]byte, 0, len(prefix)+bodyLen)
+	packet = append(packet, prefix...)
+	packet = append(packet, query.buf...)
 	return packet
 }
 
-// NewLine добавляет в запрос перевод строки (\n).
+// NewLine appends '\n'.
 func (query *ClientQuery) NewLine() *ClientQuery {
-	query.chunks = append(query.chunks, []byte{10})
+	query.buf = append(query.buf, '\n')
 	return query
 }

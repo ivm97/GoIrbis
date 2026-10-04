@@ -103,7 +103,13 @@ func (connection *Connection) clearError() {
 
 // Err returns the last operation error, if any.
 func (connection *Connection) Err() error {
-	return connection.lastErr
+	if connection.lastErr != nil {
+		return connection.lastErr
+	}
+	if connection.LastError < 0 {
+		return NewError(connection.LastError)
+	}
+	return nil
 }
 
 func randomClientID() int {
@@ -360,11 +366,11 @@ func (connection *Connection) ExecuteAnyCommand(command string, params ...string
 
 //===================================================================
 
-// FailOnError Завершение программы с ошибкой,
-// если код возврата последней операции меньше нуля.
+// FailOnError terminates the process if the last operation failed.
+// Prefer returning connection.Err() in library code.
 func (connection *Connection) FailOnError() {
-	if connection.LastError < 0 {
-		log.Fatal(DescribeError(connection.LastError))
+	if err := connection.Err(); err != nil {
+		log.Fatal(err)
 	}
 }
 
