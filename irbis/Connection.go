@@ -1398,7 +1398,7 @@ func (connection *Connection) WriteRawRecord(record *RawRecord) int {
 	query.AddAnsi(database).NewLine()
 	query.Add(0).NewLine()
 	query.Add(1).NewLine()
-	query.AddUtf(record.Encode("\x001F\x001E")).NewLine()
+	query.AddUtf(record.Encode(FullDelimiter)).NewLine()
 	response := connection.Execute(query)
 	if response == nil || !response.CheckReturnCode() {
 		return 0

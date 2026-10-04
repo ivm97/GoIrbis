@@ -2,7 +2,7 @@ package irbis
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -21,7 +21,7 @@ type ServerResponse struct {
 
 func NewServerResponse(conn net.Conn) *ServerResponse {
 	result := &ServerResponse{}
-	buffer, _ := ioutil.ReadAll(conn)
+	buffer, _ := io.ReadAll(conn)
 	result.reader = bytes.NewReader(buffer)
 	result.Command = result.ReadAnsi()
 	result.ClientId = result.ReadInteger()
@@ -102,7 +102,7 @@ func (response *ServerResponse) ReadRemainingAnsiLines() []string {
 }
 
 func (response *ServerResponse) ReadRemainingAnsiText() string {
-	line, _ := ioutil.ReadAll(response.reader)
+	line, _ := io.ReadAll(response.reader)
 	result := FromAnsi(line)
 
 	return result
@@ -118,7 +118,7 @@ func (response *ServerResponse) ReadRemainingUtfLines() []string {
 }
 
 func (response *ServerResponse) ReadRemainingUtfText() string {
-	line, _ := ioutil.ReadAll(response.reader)
+	line, _ := io.ReadAll(response.reader)
 	result := fromUtf8(line)
 
 	return result

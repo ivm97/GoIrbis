@@ -2,6 +2,7 @@ package irbis
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"strings"
 	"unicode"
@@ -267,103 +268,101 @@ func boolToInt(value bool) int {
 	return 0
 }
 
+// DescribeError returns an English description for an IRBIS return code.
+// Non-negative codes mean success. Client-side network failure uses -100000.
 func DescribeError(code int) string {
 	if code >= 0 {
-		return "Нет ошибки"
+		return "no error"
 	}
 
 	switch code {
 	case -100:
-		return "Заданный MFN вне пределов БД"
+		return "MFN is outside the database bounds"
 	case -101:
-		return "Ошибочный размер полки"
+		return "invalid shelf size"
 	case -102:
-		return "Ошибочный номер полки"
+		return "invalid shelf number"
 	case -140:
-		return "MFN вне пределов БД"
+		return "MFN is outside the database bounds"
 	case -141:
-		return "Ошибка чтения"
+		return "read error"
 	case -200:
-		return "Указанное поле отсутствует"
+		return "requested field is missing"
 	case -201:
-		return "Предыдущая версия записи отсутствует"
+		return "previous record version is missing"
 	case -202:
-		return "Заданный термин не найден (термин не существует)"
+		return "term not found"
 	case -203:
-		return "Последний термин в списке"
+		return "last term in the list"
 	case -204:
-		return "Первый термин в списке"
-	case -300:
-		return "База данных монопольно заблокирована"
-	case -301:
-		return "База данных монопольно заблокирована"
+		return "first term in the list"
+	case -300, -301:
+		return "database is exclusively locked"
 	case -400:
-		return "Ошибка при открытии файлов MST или XRF (ошибка файла данных)"
+		return "failed to open MST or XRF (master data file error)"
 	case -401:
-		return "Ошибка при открытии файлов IFP (ошибка файла индекса)"
+		return "failed to open IFP (index file error)"
 	case -402:
-		return "Ошибка при записи"
+		return "write error"
 	case -403:
-		return "Ошибка при актуализации"
-	case -600:
-		return "Запись логически удалена"
-	case -601:
-		return "Запись физически удалена"
+		return "actualization error"
+	case -600, -603:
+		return "record is logically deleted"
+	case -601, -605:
+		return "record is physically deleted"
 	case -602:
-		return "Запись заблокирована на ввод"
-	case -603:
-		return "Запись логически удалена"
-	case -605:
-		return "Запись физически удалена"
+		return "record is locked for edit"
 	case -607:
-		return "Ошибка autoin.gbl"
+		return "autoin.gbl error"
 	case -608:
-		return "Ошибка версии записи"
+		return "record version conflict"
 	case -700:
-		return "Ошибка создания резервной копии"
+		return "backup creation failed"
 	case -701:
-		return "Ошибка восстановления из резервной копии"
+		return "restore from backup failed"
 	case -702:
-		return "Ошибка сортировки"
+		return "sort error"
 	case -703:
-		return "Ошибочный термин"
+		return "invalid term"
 	case -704:
-		return "Ошибка создания словаря"
+		return "dictionary creation failed"
 	case -705:
-		return "Ошибка загрузки словаря"
+		return "dictionary load failed"
 	case -800:
-		return "Ошибка в параметрах глобальной корректировки"
+		return "invalid global correction parameters"
 	case -801:
-		return "ERR_GBL_REP"
+		return "global correction: ERR_GBL_REP"
 	case -802:
-		return "ERR_GBL_MET"
+		return "global correction: ERR_GBL_MET"
 	case -1111:
-		return "Ошибка исполнения сервера (SERVER_EXECUTE_ERROR)"
+		return "server execution error"
 	case -2222:
-		return "Ошибка в протоколе (WRONG_PROTOCOL)"
+		return "protocol error"
 	case -3333:
-		return "Незарегистрированный клиент (ошибка входа на сервер) (клиент не в списке)"
+		return "unregistered client (not in the client list)"
 	case -3334:
-		return "Клиент не выполнил вход на сервер (клиент не используется)"
+		return "client has not logged in"
 	case -3335:
-		return "Неправильный уникальный идентификатор клиента"
+		return "invalid client identifier"
 	case -3336:
-		return "Нет доступа к командам АРМ"
+		return "no access to workstation commands"
 	case -3337:
-		return "Клиент уже зарегистрирован"
+		return "client is already registered"
 	case -3338:
-		return "Недопустимый клиент"
+		return "client is not allowed"
 	case -4444:
-		return "Неверный пароль"
+		return "wrong password"
 	case -5555:
-		return "Файл не существует"
+		return "file does not exist"
 	case -6666:
-		return "Сервер перегружен. Достигнуто максимальное число потоков обработки"
+		return "server overloaded (max processing threads reached)"
 	case -7777:
-		return "Не удалось запустить/прервать поток администратора (ошибка процесса)"
+		return "failed to start or stop administrator process"
 	case -8888:
-		return "Общая ошибка"
+		return "general error"
+	case -100000:
+		return "network error: failed to connect to server"
 	}
 
-	return "Неизвестная ошибка"
+	return fmt.Sprintf("unknown error (%d)", code)
 }
