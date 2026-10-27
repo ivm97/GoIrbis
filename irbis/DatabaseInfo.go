@@ -31,20 +31,39 @@ func parseLine(line string) (result []int) {
 
 // Parse Разбор ответа сервера (см. GetDatabaseInfo)
 func (db *DatabaseInfo) Parse(lines []string) {
-	db.LogicallyDeletedRecords = parseLine(lines[0])
-	db.PhysicallyDeletedRecords = parseLine(lines[1])
-	db.NonActualizedRecords = parseLine(lines[2])
-	db.LockedRecords = parseLine(lines[3])
-	db.MaxMfn, _ = strconv.Atoi(lines[4])
-	flag, _ := strconv.Atoi(lines[5])
-	db.DatabaseLocked = flag != 0
+	if len(lines) > 0 {
+		db.LogicallyDeletedRecords = parseLine(lines[0])
+	}
+	if len(lines) > 1 {
+		db.PhysicallyDeletedRecords = parseLine(lines[1])
+	}
+	if len(lines) > 2 {
+		db.NonActualizedRecords = parseLine(lines[2])
+	}
+	if len(lines) > 3 {
+		db.LockedRecords = parseLine(lines[3])
+	}
+	if len(lines) > 4 {
+		db.MaxMfn, _ = strconv.Atoi(lines[4])
+	}
+	if len(lines) > 5 {
+		flag, _ := strconv.Atoi(lines[5])
+		db.DatabaseLocked = flag != 0
+	}
 }
 
 func ParseMenu(menu *MenuFile) (result []DatabaseInfo) {
+	if menu == nil {
+		return nil
+	}
+	result = make([]DatabaseInfo, 0, len(menu.Entries))
 	for _, entry := range menu.Entries {
 		name := entry.Code
 		if name == "*****" {
 			break
+		}
+		if name == "" {
+			continue
 		}
 		description := entry.Comment
 		readOnly := false
@@ -52,11 +71,11 @@ func ParseMenu(menu *MenuFile) (result []DatabaseInfo) {
 			name = name[1:]
 			readOnly = true
 		}
-		db := DatabaseInfo{}
-		db.Name = name
-		db.Description = description
-		db.ReadOnly = readOnly
-		result = append(result, db)
+		result = append(result, DatabaseInfo{
+			Name:        name,
+			Description: description,
+			ReadOnly:    readOnly,
+		})
 	}
 	return
 }

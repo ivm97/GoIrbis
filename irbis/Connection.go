@@ -580,9 +580,17 @@ func (connection *Connection) GetUserList() (result []UserInfo) {
 
 //===================================================================
 
-// GlobalCorrection Глобальная корректировка.
+// GlobalCorrection runs a global correction (GBL) job on the server (command "5").
+//
+// Record selection:
+//   - non-empty MfnList → explicit MFN list;
+//   - otherwise → range mode: protocol sends 0, MinMfn, MaxMfn
+//     (does not expand the range into individual MFNs).
+//
+// SearchExpression + FirstRecord/NumberOfRecords further narrow the set
+// when the server applies search before correction.
 func (connection *Connection) GlobalCorrection(settings *GblSettings) (result []string) {
-	if !connection.Connected {
+	if !connection.Connected || settings == nil {
 		return
 	}
 
@@ -595,25 +603,30 @@ func (connection *Connection) GlobalCorrection(settings *GblSettings) (result []
 		query.AddAnsi("@" + settings.Filename).NewLine()
 	} else {
 		var encoded strings.Builder
+		encoded.Grow(32 + len(settings.Statements)*48)
 		encoded.WriteString("!0")
 		encoded.WriteString(FullDelimiter)
-		for _, statement := range settings.Statements {
-			encoded.WriteString(statement.Encode(FullDelimiter))
+		for i := range settings.Statements {
+			encoded.WriteString(settings.Statements[i].Encode(FullDelimiter))
 		}
 		encoded.WriteString(FullDelimiter)
 		query.AddUtf(encoded.String()).NewLine()
 	}
 
+	first := settings.FirstRecord
+	if first < 1 {
+		first = 1
+	}
+
 	query.AddAnsi(settings.SearchExpression).NewLine()
-	query.Add(settings.FirstRecord).NewLine()
+	query.Add(first).NewLine()
 	query.Add(settings.NumberOfRecords).NewLine()
 
 	if len(settings.MfnList) == 0 {
-		count := settings.MaxMfn - settings.MinMfn + 1
-		query.Add(count).NewLine()
-		for mfn := settings.MinMfn; mfn < settings.MaxMfn; mfn++ {
-			query.Add(mfn).NewLine()
-		}
+		// 0 = MFN range mode (MinMfn..MaxMfn), not an expanded list.
+		query.Add(0).NewLine()
+		query.Add(settings.MinMfn).NewLine()
+		query.Add(settings.MaxMfn).NewLine()
 	} else {
 		query.Add(len(settings.MfnList)).NewLine()
 		for _, mfn := range settings.MfnList {
@@ -624,7 +637,6 @@ func (connection *Connection) GlobalCorrection(settings *GblSettings) (result []
 	if !settings.FormalControl {
 		query.AddAnsi("*").NewLine()
 	}
-
 	if !settings.Autoin {
 		query.AddAnsi("&").NewLine()
 	}
@@ -1315,60 +1327,99 @@ func (connection *Connection) SearchCount(expression string) int {
 
 //===================================================================
 
-// SearchEx Расширенный поиск записей.
-func (connection *Connection) SearchEx(parameters *SearchParameters) []FoundLine {
-	if !connection.Connected {
-		return []FoundLine{}
+// SearchFull runs an extended search and returns total match count plus the page.
+func (connection *Connection) SearchFull(parameters *SearchParameters) SearchOutcome {
+	if !connection.Connected || parameters == nil {
+		return SearchOutcome{Found: []FoundLine{}}
 	}
 
 	database := PickOne(parameters.Database, connection.Database)
+	first := parameters.FirstRecord
+	if first < 1 {
+		first = 1
+	}
+
 	query := NewClientQuery(connection, "K")
 	query.AddAnsi(database).NewLine()
 	query.AddUtf(parameters.Expression).NewLine()
 	query.Add(parameters.NumberOfRecords).NewLine()
-	query.Add(parameters.FirstRecord).NewLine()
+	query.Add(first).NewLine()
 	query.AddFormat(parameters.Format)
 	query.Add(parameters.MinMfn).NewLine()
 	query.Add(parameters.MaxMfn).NewLine()
 	query.AddAnsi(parameters.Sequential).NewLine()
 	response := connection.Execute(query)
 	if response == nil || !response.CheckReturnCode() {
-		return []FoundLine{}
+		return SearchOutcome{Found: []FoundLine{}}
 	}
 
-	_ = response.ReadInteger() // Число найденных записей
+	total := response.ReadInteger()
 	lines := response.ReadRemainingUtfLines()
-	result := parseFoundLines(lines)
-	return result
+	return SearchOutcome{
+		Total: total,
+		Found: parseFoundLines(lines),
+	}
+}
+
+//===================================================================
+
+// SearchEx Расширенный поиск записей.
+func (connection *Connection) SearchEx(parameters *SearchParameters) []FoundLine {
+	return connection.SearchFull(parameters).Found
 }
 
 //===================================================================
 
 // SearchRead Поиск записей с их одновременным считыванием.
-func (connection *Connection) SearchRead(expression string, limit int) (result []MarcRecord) {
+// offset — сколько записей пропустить (0-based); на сервер уходит FirstRecord = offset+1.
+func (connection *Connection) SearchRead(expression string, limit int) []MarcRecord {
+	return connection.SearchReadPaged(expression, limit, 0)
+}
+
+//===================================================================
+
+// SearchReadPaged is SearchRead with pagination (offset is 0-based).
+func (connection *Connection) SearchReadPaged(expression string, limit, offset int) []MarcRecord {
+	out := connection.SearchReadFull(expression, limit, offset)
+	return out.Records
+}
+
+//===================================================================
+
+// SearchReadFull searches, loads records for the page, and returns total matches.
+func (connection *Connection) SearchReadFull(expression string, limit, offset int) SearchReadOutcome {
 	if !connection.Connected {
-		return
+		return SearchReadOutcome{Records: []MarcRecord{}}
 	}
 
+	first := offset + 1
+	if first < 1 {
+		first = 1
+	}
 	parameters := NewSearchParameters()
 	parameters.Expression = expression
 	parameters.Format = ALL_FORMAT
 	parameters.NumberOfRecords = limit
-	found := connection.SearchEx(parameters)
-	if len(found) == 0 {
-		return
+	parameters.FirstRecord = first
+
+	outcome := connection.SearchFull(parameters)
+	if len(outcome.Found) == 0 {
+		return SearchReadOutcome{Total: outcome.Total, Records: []MarcRecord{}}
 	}
 
-	for _, item := range found {
-		lines := strings.Split(item.Description, FirstDelimiter)
-		lines = lines[1:]
-		record := MarcRecord{}
-		record.Decode(lines)
-		record.Database = connection.Database
-		result = append(result, record)
+	db := connection.Database
+	records := make([]MarcRecord, 0, len(outcome.Found))
+	for i := range outcome.Found {
+		parts := strings.Split(outcome.Found[i].Description, FirstDelimiter)
+		if len(parts) < 2 {
+			continue
+		}
+		var record MarcRecord
+		record.Decode(parts[1:])
+		record.Database = db
+		records = append(records, record)
 	}
-
-	return result
+	return SearchReadOutcome{Total: outcome.Total, Records: records}
 }
 
 //===================================================================

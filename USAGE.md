@@ -108,7 +108,9 @@ err := client.Do(ctx, func(conn *irbis.Connection) error {
 })
 ```
 
-Methods: `Do`, `Search`, `SearchCount`, `SearchAll`, `SearchRead`, `ReadRecord`, `ReadRecords`, `WriteRecord`, `FormatMfn`, `GetMaxMfn`, `ReadTerms`, `ReadTextFile`, `NoOp`.
+Methods: `Do`, `Search`, `SearchCount`, `SearchAll`, `SearchFull`, `SearchRead`, `SearchReadFull`, `ReadRecord`, `ReadRecords`, `WriteRecord`, `FormatMfn`, `GetMaxMfn`, `ReadTerms`, `ReadTextFile`, `ListDatabases`, `GetDatabaseInfo`, `GetServerVersion`, `GlobalCorrection`, `NoOp`.
+
+`SearchFull` / `SearchReadFull` return **total** matches plus the requested page (`FirstRecord = offset+1`).
 
 ---
 
@@ -333,6 +335,23 @@ fmt.Println(conn.GetUserList())
 ```
 
 Destructive / privileged ops: `CreateDatabase`, `DeleteDatabase`, `TruncateDatabase`, `Actualize*`, `UnlockDatabase`, `GlobalCorrection`.
+
+### Global correction (GBL)
+
+```go
+lines, err := client.GlobalCorrection(ctx, &irbis.GblSettings{
+	Database:         "IBIS",
+	Actualize:        true,
+	SearchExpression: "*",
+	MinMfn:           1,
+	MaxMfn:           100, // range mode: protocol sends 0, min, max
+	Statements: []irbis.GblStatement{
+		{Command: irbis.ADD_FIELD, Parameter1: "907", Parameter2: "*", Format1: "'x'"},
+	},
+})
+```
+
+Or set `Filename` (server-side `.gbl`) / `MfnList` for an explicit MFN list.
 
 ---
 

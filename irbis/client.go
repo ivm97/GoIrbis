@@ -101,14 +101,76 @@ func (c *Client) SearchAll(ctx context.Context, expression string) ([]int, error
 	return found, err
 }
 
-// SearchRead searches and loads records in one session.
-func (c *Client) SearchRead(ctx context.Context, expression string, limit int) ([]MarcRecord, error) {
-	var records []MarcRecord
+// SearchFull runs an extended search and returns total + page.
+func (c *Client) SearchFull(ctx context.Context, params *SearchParameters) (SearchOutcome, error) {
+	var out SearchOutcome
 	err := c.Do(ctx, func(conn *Connection) error {
-		records = conn.SearchRead(expression, limit)
+		out = conn.SearchFull(params)
 		return conn.Err()
 	})
-	return records, err
+	return out, err
+}
+
+// SearchRead searches and loads records in one session.
+func (c *Client) SearchRead(ctx context.Context, expression string, limit int) ([]MarcRecord, error) {
+	out, err := c.SearchReadFull(ctx, expression, limit, 0)
+	return out.Records, err
+}
+
+// SearchReadFull searches with pagination and returns total matches.
+func (c *Client) SearchReadFull(ctx context.Context, expression string, limit, offset int) (SearchReadOutcome, error) {
+	var out SearchReadOutcome
+	err := c.Do(ctx, func(conn *Connection) error {
+		out = conn.SearchReadFull(expression, limit, offset)
+		return conn.Err()
+	})
+	return out, err
+}
+
+// GlobalCorrection runs a GBL job in a one-shot session.
+func (c *Client) GlobalCorrection(ctx context.Context, settings *GblSettings) ([]string, error) {
+	var lines []string
+	err := c.Do(ctx, func(conn *Connection) error {
+		lines = conn.GlobalCorrection(settings)
+		return conn.Err()
+	})
+	return lines, err
+}
+
+// ListDatabases reads the database menu from the server.
+func (c *Client) ListDatabases(ctx context.Context, specification string) ([]DatabaseInfo, error) {
+	var list []DatabaseInfo
+	err := c.Do(ctx, func(conn *Connection) error {
+		list = conn.ListDatabases(specification)
+		return conn.Err()
+	})
+	return list, err
+}
+
+// GetDatabaseInfo loads info for one database.
+func (c *Client) GetDatabaseInfo(ctx context.Context, database string) (*DatabaseInfo, error) {
+	var info *DatabaseInfo
+	err := c.Do(ctx, func(conn *Connection) error {
+		info = conn.GetDatabaseInfo(database)
+		if info == nil {
+			if e := conn.Err(); e != nil {
+				return e
+			}
+			return NewError(CodeNetwork)
+		}
+		return nil
+	})
+	return info, err
+}
+
+// GetServerVersion returns IRBIS server version info.
+func (c *Client) GetServerVersion(ctx context.Context) (VersionInfo, error) {
+	var ver VersionInfo
+	err := c.Do(ctx, func(conn *Connection) error {
+		ver = conn.GetServerVersion()
+		return conn.Err()
+	})
+	return ver, err
 }
 
 // ReadRecord loads one record by MFN.
